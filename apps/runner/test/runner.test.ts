@@ -101,8 +101,10 @@ describe('número da tentativa nos relatórios', () => {
 describe('heartbeat e cancelamento', () => {
   it('envia heartbeat enquanto o executor trabalha e para quando ele termina', async () => {
     const { client } = fakeClient(jobFor('/work/repo', { heartbeatMs: 20 }));
+    // Espera por condição (não por tempo fixo): com a máquina carregada os timers atrasam e o teste ficava instável.
     const slow: Executor = async () => {
-      await sleep(130);
+      const end = Date.now() + 5_000;
+      while (vi.mocked(client.heartbeat).mock.calls.length < 3 && Date.now() < end) await sleep(10);
       return { output: 'ok', usage: { model: 'm', inputTokens: 1, outputTokens: 1 } };
     };
     await processNextJob({ client, executor: slow, allowedWorkspaces: ALLOWED, signingKey: KEY });
