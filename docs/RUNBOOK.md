@@ -83,6 +83,10 @@ node scripts/e2e-agent.mjs                  # 21 verificações; E2E_SANDBOX_IMA
 node scripts/demo-pending-approval.mjs      # sobe o painel em http://127.0.0.1:3097 com uma aprovação de ferramenta pendente
 ```
 
+## Idempotency-Key
+
+POST de `/executions`, `/agents`, `/projects` e `/providers` aceita `Idempotency-Key` (8 a 128 caracteres: letras, números, `_ . : -`). Repetir a mesma chave com o mesmo corpo devolve a resposta original; o corpo diferente ou outra rota devolve 422 `idempotency_key_reuse`. As respostas ficam guardadas por 24 h (registro `idempotency` no banco, no máximo 500 por organização). Falhas (4xx/5xx) não são guardadas, então repetir depois de um erro executa de novo.
+
 ## Encerramento e reinício
 
 Cada requisição confirma a própria transação antes de responder; não há fila de gravação em segundo plano. `SIGTERM` e `SIGINT` terminam as requisições em curso e fecham o pool; um `kill -9` no meio de uma requisição descarta só a transação daquela requisição (o banco a desfaz), nunca grava pela metade.

@@ -95,7 +95,7 @@ export function NewExecution() {
     try {
       const body: Record<string, unknown> = { goal, projectId: selectedProject, agentId: selectedAgent };
       if (budget) body.budgetUsd = Number(budget);
-      const res = await api<{ execution: Execution; tasks: Task[] }>('/executions', { method: 'POST', body });
+      const res = await api<{ execution: Execution; tasks: Task[] }>('/executions', { method: 'POST', body, idempotent: true });
       setExecId(res.execution.id);
       setPlan(res.tasks.map((x) => ({ id: x.planId, title: x.title, agentId: x.agentId, dependsOn: x.dependsOn.map((d) => d.split(':').pop() ?? d), risk: x.risk })));
     } catch (err) {

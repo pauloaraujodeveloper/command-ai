@@ -220,4 +220,22 @@ describe.skipIf(!ownerUrl || !appUrl)('API em modo PostgreSQL com duas instânci
     const job = await claim(B, runner);
     expect(job?.payload.taskId).toBe(`${high.execId}:deploy`);
   }, 120_000);
+
+it('Idempotency-Key vale entre instâncias e sob concorrência: uma única execução no banco', async () => {
+    const { headers } = await register(A);
+    const agent = (await A.inject({ method: 'POST', url: '/api/v1/agents', headers, payload: { name: 'Ag', role: 'r', instructions: 'i', providerKind: 'simulated', model: 'claude-sonnet-5-5', budgetUsd: 5 } })).json();
+    const project = (await A.inject({ method: 'POST', url: '/api/v1/projects', headers, payload: { name: 'P', workspacePath: '/work/repo' } })).json();
+    const payload = { goal: 'Meta de teste', projectId: project.id, agentId: agent.id };
+    const h = { ...headers, 'idempotency-key': `pg-chave-${uid()}-abcd` };
+    // seis requisições ao mesmo tempo, alternando as instâncias
+    const results = await Promise.all(Array.from({ length: 6 }, (_, i) => (i % 2 ? A : B).inject({ method: 'POST', url: '/api/v1/executions', headers: h, payload })));
+    expect(results.map((r) => r.statusCode)).toEqual([201, 201, 201, 201, 201, 201]);
+    expect(new Set(results.map((r) => r.json().execution.id)).size).toBe(1);
+    const list = (await B.inject({ method: 'GET', url: '/api/v1/executions', headers })).json().items;
+    expect(list).toHaveLength(1);
+    // depois, a repetição na outra instância também devolve o mesmo
+    const again = await B.inject({ method: 'POST', url: '/api/v1/executions', headers: h, payload });
+    expect(again.headers['idempotent-replayed']).toBe('true');
+    expect(again.json().execution.id).toBe(list[0].id);
+  }, 120_000);
 });

@@ -28,7 +28,7 @@ export function Agents() {
     setBusy(true);
     setError(null);
     try {
-      await api('/agents', { method: 'POST', body: { ...form, budgetUsd: Number(form.budgetUsd) } });
+      await api('/agents', { method: 'POST', body: { ...form, budgetUsd: Number(form.budgetUsd) }, idempotent: true });
       setForm(blank);
       await agents.reload(true);
     } catch (err) {

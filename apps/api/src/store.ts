@@ -167,6 +167,17 @@ export interface Task {
   lastUsageTurn?: number;
   position: number;
 }
+/** Resposta guardada de uma criação feita com Idempotency-Key. Vale por usuário e expira. */
+export interface IdempotencyRecord {
+  id: string; // `${userId}:${chave}`
+  organizationId: string;
+  /** Impressão digital de método, rota e corpo: a mesma chave com outro pedido é recusada. */
+  fingerprint: string;
+  status: number;
+  contentType: string;
+  body: string;
+  createdAt: number;
+}
 export interface Approval {
   id: string;
   organizationId: string;
@@ -222,6 +233,7 @@ export function createStore(sink?: Sink, hooks: StoreHooks = {}) {
     executions: new Table<Execution>('execution', sink),
     tasks: new Table<Task>('task', sink),
     approvals: new Table<Approval>('approval', sink),
+    idempotency: new Table<IdempotencyRecord>('idempotency', sink),
     runners: new Table<Runner>('runner', sink),
 
     hydrateEvents(list: EventEnvelope[]): void {

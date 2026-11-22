@@ -17,7 +17,7 @@ export function Projects() {
     setBusy(true);
     setError(null);
     try {
-      await api('/projects', { method: 'POST', body: { name, workspacePath } });
+      await api('/projects', { method: 'POST', body: { name, workspacePath }, idempotent: true });
       setName('');
       setWorkspacePath('');
       await projects.reload(true);

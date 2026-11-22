@@ -40,6 +40,10 @@ import { createStore, type Store, type User } from './store.ts';
 
 export interface AppOptions {
   jobSigningKey: string;
+  /** Quanto tempo uma chave de idempotência vale (padrão 24 h). */
+  idempotencyTtlMs?: number;
+  /** Máximo de chaves guardadas por organização (padrão 500); as mais antigas saem primeiro. */
+  idempotencyMaxKeys?: number;
   production: boolean;
   logger?: boolean;
   /** Destino dos logs (nível warn ou acima). Usado em testes para conferir que a API não registra erros inesperados. */
@@ -272,6 +276,67 @@ export async function buildApp(opts: AppOptions) {
       },
       (err) => done(err as Error),
     );
+  });
+
+  /* ---------- Idempotency-Key: criações repetidas (clique duplo, nova tentativa de rede) não duplicam ---------- */
+  // Fica de fora o que devolve segredo (token de Runner): guardar a resposta seria guardar o segredo.
+  const IDEMPOTENT_POSTS = new Set(['/api/v1/executions', '/api/v1/agents', '/api/v1/projects', '/api/v1/providers']);
+  const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9_.:-]{8,128}$/;
+  const idemTtl = opts.idempotencyTtlMs ?? 24 * 60 * 60 * 1000;
+  const idemMax = opts.idempotencyMaxKeys ?? 500;
+  const idemPending = new WeakMap<FastifyRequest, { id: string; fingerprint: string; organizationId: string }>();
+  const canonical = (v: unknown): unknown =>
+    Array.isArray(v) ? v.map(canonical) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, x]) => [k, canonical(x)])) : v;
+
+  app.addHook('preHandler', async (req, reply) => {
+    const path = req.url.split('?')[0] ?? '';
+    const raw = req.headers['idempotency-key'];
+    if (req.method !== 'POST' || !IDEMPOTENT_POSTS.has(path) || raw === undefined) return;
+    const key = Array.isArray(raw) ? raw[0] : raw;
+    if (!key || !IDEMPOTENCY_KEY_RE.test(key)) {
+      return problem(reply, 400, 'invalid_idempotency_key', 'Idempotency-Key deve ter de 8 a 128 caracteres (letras, números, _ . : -).');
+    }
+    const cookie = req.cookies[SESSION_COOKIE];
+    const session = cookie ? store.sessions.get(sha256(cookie)) : undefined;
+    if (!session || session.expiresAt < Date.now()) return; // sem sessão válida: o handler responde 401 pelo caminho normal
+    const id = `${session.userId}:${key}`;
+    const fingerprint = sha256(JSON.stringify([req.method, path, canonical(req.body ?? null)]));
+    const found = store.idempotency.get(id);
+    if (found && Date.now() - found.createdAt < idemTtl) {
+      if (found.fingerprint !== fingerprint) {
+        return problem(reply, 422, 'idempotency_key_reuse', 'Esta Idempotency-Key já foi usada com outra requisição.');
+      }
+      void reply.code(found.status).header('content-type', found.contentType).header('idempotent-replayed', 'true').send(found.body);
+      return reply;
+    }
+    idemPending.set(req, { id, fingerprint, organizationId: session.organizationId });
+  });
+
+  // Guarda a resposta de sucesso na mesma unidade de trabalho que criou o recurso (grava junto ou não grava).
+  app.addHook('onSend', async (req, reply, payload) => {
+    const pending = idemPending.get(req);
+    if (!pending) return payload;
+    idemPending.delete(req);
+    const handle = units.get(req);
+    if (!handle || reply.statusCode < 200 || reply.statusCode >= 300 || typeof payload !== 'string' || payload.length > 64_000) return payload;
+    const st = handle.store;
+    const now = Date.now();
+    st.idempotency.insert({
+      id: pending.id,
+      organizationId: pending.organizationId,
+      fingerprint: pending.fingerprint,
+      status: reply.statusCode,
+      contentType: String(reply.getHeader('content-type') ?? 'application/json; charset=utf-8'),
+      body: payload,
+      createdAt: now,
+    });
+    // Poda: vencidas e, passando do limite, as mais antigas.
+    const mine = st.idempotency.filter((r) => r.organizationId === pending.organizationId).sort((a, b) => a.createdAt - b.createdAt);
+    const expired = mine.filter((r) => now - r.createdAt >= idemTtl);
+    const live = mine.filter((r) => now - r.createdAt < idemTtl);
+    for (const r of expired) st.idempotency.delete(r.id);
+    for (const r of live.slice(0, Math.max(0, live.length - idemMax))) st.idempotency.delete(r.id);
+    return payload;
   });
 
   // Confirma (ou desfaz) a unidade de trabalho antes de a resposta sair: o cliente só recebe sucesso se estiver gravado.
