@@ -1,0 +1,133 @@
+@import 'tailwindcss';
+
+/*
+ * Tokens. No Command AI a cor significa estado; o resto da interface fica neutro.
+ * Valores de estado vêm do PRD v2 (seção Design system).
+ */
+:root {
+  color-scheme: dark;
+  --bg: #0d1117;
+  --surface: #141a22;
+  --raised: #1b222c;
+  --line: #262e3a;
+  --line-strong: #364254;
+  --fg: #e7ebf1;
+  --muted: #98a3b5;
+  --faint: #6b7587;
+
+  --run: #5ca4ff;
+  --wait: #f4b74a;
+  --done: #4dd2a4;
+  --fail: #ff7b6c;
+  --queue: #6e7893;
+
+  --inv-bg: #e7ebf1;
+  --inv-fg: #0d1117;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --raised: #edf0f4;
+  --line: #dde1e8;
+  --line-strong: #bfc7d3;
+  --fg: #161b22;
+  --muted: #4f5a6d;
+  --faint: #6f7a8d;
+
+  --run: #1d6fe0;
+  --wait: #b26d00;
+  --done: #0f7f5f;
+  --fail: #cc3f2b;
+  --queue: #7a839c;
+
+  --inv-bg: #161b22;
+  --inv-fg: #f5f6f8;
+}
+
+@theme inline {
+  --font-sans: 'Hanken Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-run: var(--run);
+  --color-wait: var(--wait);
+  --color-done: var(--done);
+  --color-fail: var(--fail);
+  --color-queue: var(--queue);
+  --color-inv-bg: var(--inv-bg);
+  --color-inv-fg: var(--inv-fg);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--run);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--run) 35%, transparent);
+}
+
+/* Movimento só para responder a uma ação ou chamar atenção para o que exige decisão. */
+@keyframes ca-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes ca-wait-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--wait) 55%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--wait) 0%, transparent);
+  }
+}
+
+.ca-spin {
+  animation: ca-spin 1s linear infinite;
+}
+.ca-await {
+  animation: ca-wait-pulse 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ca-spin,
+  .ca-await {
+    animation: none;
+  }
+  * {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}

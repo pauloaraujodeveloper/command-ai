@@ -1,0 +1,8 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Pacotes autorizados a rodar scripts de instalação (baixam binários nativos): Electron e esbuild.
+onlyBuiltDependencies:
+  - electron
+  - esbuild

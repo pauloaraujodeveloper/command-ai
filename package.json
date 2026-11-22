@@ -1,0 +1,31 @@
+{
+  "name": "command-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Command AI: crie agentes, delegue objetivos e acompanhe, aprove e audite o trabalho.",
+  "packageManager": "pnpm@10.34.9",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter @command-ai/api --filter @command-ai/web run dev",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "db:migrate": "pnpm --filter @command-ai/api run db:migrate",
+    "runner": "pnpm --filter @command-ai/runner run start",
+    "desktop": "pnpm --filter @command-ai/desktop run start",
+    "desktop:dist": "pnpm --filter @command-ai/web run build && pnpm --filter @command-ai/desktop run dist:win",
+    "turbo:build": "turbo run build",
+    "turbo:test": "turbo run test",
+    "worker": "pnpm --filter @command-ai/api run worker"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.0"
+  },
+  "dependencies": {
+    "@neon/config": "^1.14.6",
+    "@neon/env": "^2.1.9"
+  }
+}

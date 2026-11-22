@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:" />
+    <title>Command AI</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0d1117; color: #e7ebf1; font: 14px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; }
+      main { max-width: 440px; padding: 24px; }
+      h1 { font-size: 20px; margin: 0 0 8px; }
+      p { color: #98a3b5; margin: 0 0 16px; }
+      code { font: 13px ui-monospace, Consolas, monospace; color: #e7ebf1; word-break: break-all; }
+      button { background: #e7ebf1; color: #0d1117; border: 0; border-radius: 6px; padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer; }
+      button:focus-visible { outline: 2px solid #5ca4ff; outline-offset: 2px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Não foi possível conectar ao servidor</h1>
+      <p>Confira se o servidor do Command AI está no ar e se você está com internet. Servidor configurado: <code id="target"></code></p>
+      <button id="retry" type="button">Tentar de novo</button>
+    </main>
+    <script>
+      var params = new URLSearchParams(location.search);
+      var target = params.get('target') || '';
+      var ok = /^https?:\/\//.test(target);
+      document.getElementById('target').textContent = ok ? target : '—';
+      document.getElementById('retry').addEventListener('click', function () {
+        if (ok) location.href = target;
+      });
+    </script>
+  </body>
+</html>

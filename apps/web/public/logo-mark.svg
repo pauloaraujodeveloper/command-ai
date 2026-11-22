@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Command AI">
+  <defs>
+    <linearGradient id="g" x1="8" y1="86" x2="92" y2="14" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3b8cff"/>
+      <stop offset="1" stop-color="#3ddc97"/>
+    </linearGradient>
+    <radialGradient id="c" cx="45%" cy="40%" r="65%">
+      <stop offset="0" stop-color="#9ccbff"/>
+      <stop offset="0.55" stop-color="#3b8cff"/>
+      <stop offset="1" stop-color="#1d5fd1"/>
+    </radialGradient>
+  </defs>
+  <g fill="none" stroke="url(#g)" stroke-width="3.2">
+    <ellipse cx="50" cy="50" rx="42" ry="16.5"/>
+    <ellipse cx="50" cy="50" rx="42" ry="16.5" transform="rotate(60 50 50)"/>
+    <ellipse cx="50" cy="50" rx="42" ry="16.5" transform="rotate(120 50 50)"/>
+  </g>
+  <circle cx="50" cy="50" r="15" fill="none" stroke="#7db6ff" stroke-width="2.4" stroke-dasharray="14 8" stroke-linecap="round" opacity="0.9"/>
+  <circle cx="50" cy="50" r="9.5" fill="url(#c)"/>
+  <g>
+    <circle cx="92" cy="50" r="3.6" fill="#3ddc97"/>
+    <circle cx="8" cy="50" r="3.6" fill="#3b8cff"/>
+    <circle cx="71" cy="86.4" r="3.6" fill="#3ddc97"/>
+    <circle cx="29" cy="13.6" r="3.6" fill="#3b8cff"/>
+    <circle cx="29" cy="86.4" r="3.6" fill="#3b8cff"/>
+    <circle cx="71" cy="13.6" r="3.6" fill="#3ddc97"/>
+  </g>
+</svg>

@@ -1,0 +1,23 @@
+# Serviços locais de desenvolvimento do Command AI.
+#   docker compose up -d redis
+# O Redis fica preso a 127.0.0.1 (porta 6390 para não colidir com outros projetos).
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: command-ai-redis
+    # noeviction: nunca descarta chaves (o PRD exige; uma fila que perde jobs por falta de memória não serve).
+    # appendonly: o que está na fila sobrevive a um reinício do contêiner.
+    command: ["redis-server", "--maxmemory-policy", "noeviction", "--appendonly", "yes", "--save", ""]
+    ports:
+      - "127.0.0.1:6390:6379"
+    volumes:
+      - command-ai-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  command-ai-redis:
