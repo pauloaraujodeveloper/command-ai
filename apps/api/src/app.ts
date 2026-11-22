@@ -93,6 +93,8 @@ interface Auth {
 }
 
 const SESSION_COOKIE = 'ca_session';
+/** Tamanho máximo do resultado de uma tarefa repassado às dependentes. */
+const UPSTREAM_MAX = 8_000;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const RUNNER_ONLINE_MS = 30_000;
 const WRITE_ROLES: Role[] = ['owner', 'admin', 'developer', 'operator'];
@@ -972,9 +974,23 @@ export async function buildApp(opts: AppOptions) {
     const exec = store.executions.get(task.executionId)!;
     const project = store.projects.get(exec.projectId)!;
     const agent = store.agents.get(task.agentId)!;
+    // Resultado das tarefas de que esta depende (só as diretas, na ordem do plano). É dado de outro agente: o Runner o trata como não confiável.
+    const upstream = task.dependsOn
+      .map((id) => store.tasks.get(id))
+      .filter((t): t is NonNullable<typeof t> => !!t && t.executionId === task.executionId && t.status === 'done')
+      .map((t) => {
+        const out = t.output ?? '';
+        return {
+          taskId: t.id.slice(t.executionId.length + 1),
+          title: t.title,
+          output: out.length > UPSTREAM_MAX ? `${out.slice(0, UPSTREAM_MAX)}\n[resultado cortado: ${out.length - UPSTREAM_MAX} caracteres omitidos]` : out,
+          ...(t.workspaceCommit ? { commit: t.workspaceCommit } : {}),
+        };
+      });
     const job = signJob(
       {
         taskId: task.id,
+        upstream,
         executionId: exec.id,
         workspacePath: project.workspacePath,
         prompt: `${task.title}\n\nObjetivo geral: ${exec.goal}`,
@@ -1048,7 +1064,7 @@ export async function buildApp(opts: AppOptions) {
     const body = parse(runnerReportSchema, req.body);
     if (body.output === undefined || !body.usage) return problem(reply, 400, 'validation_error', 'Informe output e usage.');
     // Idempotente: repetição, tentativa antiga ou tarefa já cancelada voltam 200 com applied=false, sem efeito.
-    const outcome = orchestrator.completeTask(task.id, { output: body.output, usage: body.usage }, { attempt: body.attempt });
+    const outcome = orchestrator.completeTask(task.id, { output: body.output, usage: body.usage, workspaceCommit: body.workspaceCommit }, { attempt: body.attempt });
     return { ok: true, applied: outcome === 'applied' };
   });
 

@@ -227,6 +227,8 @@ export const runnerReportSchema = z.object({
   output: z.string().max(200_000).optional(),
   reason: z.string().max(2000).optional(),
   usage: usageSchema.optional(),
+  /** Commit (SHA-1 completo) com o trabalho da tarefa no repositório do Runner. Só hexadecimal: nunca nome, opção ou caminho. */
+  workspaceCommit: z.string().regex(/^[0-9a-f]{40}$/, 'commit inválido').optional(),
 });
 
 export const ROLES = ['owner', 'admin', 'developer', 'operator', 'viewer'] as const;

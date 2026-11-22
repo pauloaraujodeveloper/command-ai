@@ -12,11 +12,19 @@ export interface FinalizeResult {
   /** Patch (truncado para caber no relatório). O completo vai para `patchFile`. */
   patch: string;
   patchFile: string | null;
+  /**
+   * Commit com o estado do workspace ao fim da tarefa (a base, se nada mudou). Fica numa referência
+   * `refs/command-ai/*` do repositório (não no branch da pessoa) para as tarefas seguintes partirem dele.
+   * Ausente em workspace sem Git.
+   */
+  commit?: string;
 }
 
 export interface TaskWorkspace {
   root: string;
   kind: WorkspaceKind;
+  /** Aviso quando algum commit de tarefa anterior não pôde ser usado como base. */
+  baseNote?: string;
   /** Resume o que o agente mudou (e guarda o patch em arquivo). */
   finalize(): Promise<FinalizeResult>;
   /** Remove o worktree se não houve mudanças; com mudanças ele fica para revisão. */
@@ -31,7 +39,12 @@ interface Options {
   dataDir: string;
   /** Pasta que não é repositório Git: permite escrever direto nela. Padrão: somente leitura. */
   allowDirectWrites?: boolean;
+  /** Commits das tarefas anteriores (dependências). A tarefa parte do resultado delas, combinadas. Só SHA-1 hexadecimal completo. */
+  baseCommits?: string[];
 }
+
+const SHA_RE = /^[0-9a-f]{40}$/;
+const IDENT = ['-c', 'user.name=Command AI', '-c', 'user.email=agent@command-ai.local', '-c', 'commit.gpgsign=false'];
 
 const MAX_PATCH_IN_REPORT = 100_000;
 const MAX_PATCH_FILE = 5_000_000;
@@ -91,7 +104,35 @@ export async function createTaskWorkspace(opts: Options): Promise<TaskWorkspace>
   }
   await rm(wtPath, { recursive: true, force: true });
   await runGit(toplevel, hooksDir, ['worktree', 'prune']);
-  await runGit(toplevel, hooksDir, ['worktree', 'add', '--detach', '--quiet', wtPath, 'HEAD']);
+
+  // Bases: só commits completos que ESTE repositório conhece. Qualquer outra coisa nunca chega ao git como argumento.
+  const usable: string[] = [];
+  const problems: string[] = [];
+  for (const sha of opts.baseCommits ?? []) {
+    if (typeof sha !== 'string' || !SHA_RE.test(sha)) {
+      problems.push('referência de commit inválida');
+      continue;
+    }
+    try {
+      await runGit(toplevel, hooksDir, ['cat-file', '-e', `${sha}^{commit}`]);
+      if (!usable.includes(sha)) usable.push(sha);
+    } catch {
+      problems.push(`commit ${sha.slice(0, 8)} não encontrado neste Runner`);
+    }
+  }
+  const baseNote = problems.length ? `${problems.join('; ')}; ${usable.length ? 'usando os demais' : 'partindo do HEAD'}` : undefined;
+
+  await runGit(toplevel, hooksDir, ['worktree', 'add', '--detach', '--quiet', wtPath, usable[0] ?? 'HEAD']);
+  for (const sha of usable.slice(1)) {
+    try {
+      await runGit(wtPath, hooksDir, [...IDENT, 'merge', '--no-edit', '--no-ff', '-m', 'command-ai: combina resultados das tarefas anteriores', sha]);
+    } catch {
+      await runGit(wtPath, hooksDir, ['merge', '--abort']).catch(() => undefined);
+      await runGit(toplevel, hooksDir, ['worktree', 'remove', '--force', wtPath]).catch(() => rm(wtPath, { recursive: true, force: true }));
+      await runGit(toplevel, hooksDir, ['worktree', 'prune']).catch(() => undefined);
+      throw new Error('Conflito ao combinar os resultados das tarefas anteriores (elas alteram as mesmas linhas); resolva manualmente.');
+    }
+  }
 
   // Se o workspace é uma subpasta do repositório, o agente começa na mesma subpasta dentro do worktree.
   const sub = relative(resolve(toplevel), resolve(opts.workspacePath));
@@ -101,11 +142,15 @@ export async function createTaskWorkspace(opts: Options): Promise<TaskWorkspace>
   return {
     root,
     kind: 'worktree',
+    baseNote,
     async finalize() {
       await runGit(wtPath, hooksDir, ['add', '-A']);
       const names = (await runGit(wtPath, hooksDir, ['diff', '--cached', '--name-only'])).split('\n').filter(Boolean);
+      const ref = `refs/command-ai/${name}`;
       if (names.length === 0) {
-        last = { changedFiles: 0, stat: '', patch: '', patchFile: null };
+        const same = (await runGit(wtPath, hooksDir, ['rev-parse', 'HEAD'])).trim();
+        await runGit(toplevel, hooksDir, ['update-ref', ref, same]);
+        last = { changedFiles: 0, stat: '', patch: '', patchFile: null, commit: same };
         return last;
       }
       const stat = (await runGit(wtPath, hooksDir, ['diff', '--cached', '--stat', '--no-color'])).trim();
@@ -113,7 +158,11 @@ export async function createTaskWorkspace(opts: Options): Promise<TaskWorkspace>
       await mkdir(join(opts.dataDir, 'patches'), { recursive: true });
       const patchFile = join(opts.dataDir, 'patches', `${name}.patch`);
       await writeFile(patchFile, full.length > MAX_PATCH_FILE ? `${full.slice(0, MAX_PATCH_FILE)}\n[patch cortado]\n` : full, 'utf8');
+      await runGit(wtPath, hooksDir, [...IDENT, 'commit', '-q', '-m', `command-ai: resultado da tarefa ${opts.taskId} (tentativa ${opts.attempt})`]);
+      const commit = (await runGit(wtPath, hooksDir, ['rev-parse', 'HEAD'])).trim();
+      await runGit(toplevel, hooksDir, ['update-ref', ref, commit]);
       last = {
+        commit,
         changedFiles: names.length,
         stat,
         patch: full.length > MAX_PATCH_IN_REPORT ? `${full.slice(0, MAX_PATCH_IN_REPORT)}\n[patch cortado: veja o arquivo completo]\n` : full,

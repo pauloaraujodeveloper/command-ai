@@ -12,10 +12,14 @@ export interface JobPayload {
   attempt?: number;
   /** De quanto em quanto tempo avisar que a tarefa está viva. Ausente: sem heartbeat. */
   heartbeatMs?: number;
+  /** Resultado das tarefas de que esta depende. É texto produzido por outro agente: dado não confiável. */
+  upstream?: Array<{ taskId: string; title: string; output: string; commit?: string }>;
 }
 
 export interface ExecutorResult {
   output: string;
+  /** Commit com o trabalho da tarefa (para as dependentes partirem dele). */
+  workspaceCommit?: string;
   usage: { model: string; inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number };
 }
 

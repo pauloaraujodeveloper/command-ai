@@ -107,9 +107,11 @@ async function runExecution(label, toolDecision) {
     await sleep(400);
   }
   if (!final) throw new Error(`execução ${label} não terminou em 90 s`);
-  return { exec: final, seenTool, tasks: created.tasks.length };
+  const detail = await api('GET', `/executions/${exec.id}`);
+  return { exec: final, seenTool, tasks: created.tasks.length, taskList: detail.tasks };
 }
 
+const headBefore = git('rev-parse', 'HEAD').toString().trim();
 let projectId;
 let agentId;
 try {
@@ -149,7 +151,7 @@ try {
   check('A: custo calculado pelo servidor', typeof A.exec.costUsd === 'number' && A.exec.costUsd > 0, String(A.exec.costUsd));
 
   const patchesA = existsSync(join(dataDir, 'patches')) ? readdirSync(join(dataDir, 'patches')) : [];
-  check('A: um patch por tarefa, gerado fora do repositório', patchesA.length === A.tasks, patchesA.length + ' patches');
+  check('A: só a primeira tarefa gera patch (as seguintes herdam o trabalho e não mudam nada), fora do repositório', patchesA.length === 1, patchesA.length + ' patches');
   const patchA = patchesA.map((f) => readFileSync(join(dataDir, 'patches', f), 'utf8')).join(' ');
   check('A: patch contém o relatório e não o rascunho apagado', /AGENTE-RELATORIO\.md/.test(patchA) && !/RASCUNHO\.tmp/.test(patchA));
   check('A: pasta da pessoa intacta (git status limpo, sem relatório)', git('status', '--porcelain').toString().trim() === '' && !existsSync(join(repo, 'AGENTE-RELATORIO.md')));
@@ -158,6 +160,12 @@ try {
   const evA = JSON.stringify(await api('GET', `/executions/${A.exec.id}/events?format=json`));
   check('A: linhas de log do agente chegaram ao servidor (ferramentas e aprovação)', /Ferramenta list_dir/.test(evA) && /Aprovado: delete_file/.test(evA));
   check('A: comando rodou no sandbox Docker (ls do /workspace)', /Resultado run_command: ok — exit=0/.test(evA));
+
+  /* ---- encadeamento (Fase 4) ---- */
+  check('Encadeamento: toda tarefa concluída guardou o commit do resultado', A.taskList.length === A.tasks && A.taskList.every((t) => /^[0-9a-f]{40}$/.test(t.workspaceCommit ?? '')), A.taskList.map((t) => (t.workspaceCommit ?? '-').slice(0, 7)).join(','));
+  check('Encadeamento: as tarefas dependentes partiram do resultado da anterior (Runner avisou no log)', (evA.match(/Workspace parte do resultado das tarefas anteriores/g) ?? []).length === A.tasks - 1, String((evA.match(/Workspace parte do resultado das tarefas anteriores/g) ?? []).length));
+  check('Encadeamento: a tarefa seguinte enxergou o arquivo criado pela anterior', (evA.match(/Resultado list_dir: ok[^"]*AGENTE-RELATORIO.md/g) ?? []).length >= A.tasks - 1);
+  check('Encadeamento: o branch e a árvore da pessoa continuam intactos', git('rev-parse', 'HEAD').toString().trim() === headBefore && git('status', '--porcelain').toString().trim() === '');
 
   /* ---- B: rejeita a chamada de ferramenta ---- */
   const B = await runExecution('rejeitando', 'rejected');

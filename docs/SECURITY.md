@@ -40,8 +40,9 @@ Resumo do que está implementado e testado, e do que ainda falta. Nada aqui gara
 | Política de risco e **aprovação humana por chamada** (apagar, escrever direto, comando com escrita ou rede, ferramenta desconhecida); prazo, falha ou dúvida = nega; texto do modelo não concede permissão | `agent/policy.ts`, `policy.test.ts`, `loop.test.ts` |
 | Limites do agente: turnos, tokens, tempo total, bytes de ferramentas; cancelamento e orçamento propagam ao laço; `max_tokens` e recusa não executam ferramentas | `agent/loop.ts`, `loop.test.ts` |
 | Aprovações de ferramenta no servidor: no máximo 5 pendentes, idempotentes por tentativa, encerradas automaticamente quando a tarefa termina; uso por turno idempotente | `orchestrator.ts`, `agent-support.test.ts`, `runner-api.test.ts` |
+| Encadeamento: o commit do resultado vem como SHA-1 hexadecimal (o servidor recusa qualquer outra coisa) e o Runner só o usa se o repositório local o conhecer; nada vindo do servidor chega ao git como opção ou nome; texto de tarefa anterior entra delimitado e sem poder fechar o bloco; conflito entre dependências falha em vez de escolher um lado | `chaining.test.ts`, `worktree.test.ts`, `agent-executor.test.ts` |
 | Chave do provedor só no ambiente do Runner; erros do provedor sem corpo bruto e sem a chave | `agent/anthropic-client.ts`, `anthropic-client.test.ts` |
-| Teste ponta a ponta com processos reais (API + Runner + Docker + aprovação pela API, aprovando e rejeitando) | `apps/runner/scripts/e2e-agent.mjs` (17 verificações) |
+| Teste ponta a ponta com processos reais (API + Runner + Docker + aprovação pela API, aprovando e rejeitando) | `apps/runner/scripts/e2e-agent.mjs` (21 verificações) |
 
 ### Modelo de ameaças do agente
 

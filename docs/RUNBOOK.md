@@ -73,12 +73,13 @@ $env:RUNNER_EXECUTOR = 'agent'; $env:ANTHROPIC_API_KEY = '...'; pnpm runner
 - **O que o agente faz:** lê e escreve num **worktree Git isolado** (fora do seu repositório) e entrega um **patch** no resultado e em `RUNNER_DATA_DIR/patches/`. Para aplicar depois de revisar: `git apply "<arquivo.patch>"`. Worktrees com mudanças ficam para revisão; sem mudanças, são removidos. Pasta sem Git (ou sem commit) é somente leitura.
 - **Aprovações de ferramenta** aparecem em *Aprovações* (e na fila de atenção) com a ferramenta, o resumo, o risco e os argumentos exatos. Aprovar vale só para aquela chamada. Sem decisão em `RUNNER_APPROVAL_TIMEOUT_MS`, a chamada é negada.
 - **Sem Docker ou sem a imagem:** o Runner avisa na partida (`Sandbox de comandos: INDISPONÍVEL…`) e a ferramenta `run_command` não é oferecida. Nada roda no host.
+- **Referências do encadeamento:** cada tarefa concluída deixa `refs/command-ai/<tarefa>-a<tentativa>` no seu repositório (o branch não muda). Para ver: `git for-each-ref refs/command-ai`. Para apagar todas: `git for-each-ref --format='%(refname)' refs/command-ai | ForEach-Object { git update-ref -d $_ }` e depois `git gc`.
 - **Limpeza:** `docker ps -a --filter name=ca-sbx-` deve estar vazio fora de uma execução. Worktrees esquecidos: `git worktree list` no repositório e `git worktree prune`.
 - **Verificar tudo de ponta a ponta sem chave de API** (usa o modelo de demonstração, o Docker local e uma API em memória):
 
 ```powershell
 cd apps/runner
-node scripts/e2e-agent.mjs                  # 17 verificações; E2E_SANDBOX_IMAGE escolhe a imagem local (padrão redis:7-alpine)
+node scripts/e2e-agent.mjs                  # 21 verificações; E2E_SANDBOX_IMAGE escolhe a imagem local (padrão redis:7-alpine)
 node scripts/demo-pending-approval.mjs      # sobe o painel em http://127.0.0.1:3097 com uma aprovação de ferramenta pendente
 ```
 

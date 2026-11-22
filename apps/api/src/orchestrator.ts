@@ -347,10 +347,10 @@ export class Orchestrator {
     return task.status === 'queued' && task.attempts > 0; // já voltou para a fila (lease vencido)
   }
 
-  completeTask(taskId: string, result: { output: string; usage: Usage }, opts: { attempt?: number } = {}): ReportOutcome {
+  completeTask(taskId: string, result: { output: string; usage: Usage; workspaceCommit?: string }, opts: { attempt?: number } = {}): ReportOutcome {
     const task = this.mustTask(taskId);
     if (this.isStale(task, opts.attempt)) return 'ignored';
-    this.setTask(task.id, 'done', { output: result.output, leaseExpiresAt: undefined });
+    this.setTask(task.id, 'done', { output: result.output, workspaceCommit: result.workspaceCommit, leaseExpiresAt: undefined });
     this.recordUsage(task.executionId, task.id, result.usage);
     const exec = this.mustExecution(task.executionId);
     if (exec.status !== 'running' && exec.status !== 'waiting_approval') return 'applied'; // já encerrada (orçamento)

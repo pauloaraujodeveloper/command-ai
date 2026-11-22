@@ -22,7 +22,7 @@ Requisitos: Node 22+ e pnpm 10 (`npm i -g pnpm`).
 
 ```powershell
 pnpm install
-pnpm test          # 313 testes (os de Postgres, Redis e Docker rodam contra serviços reais e são ignorados sem eles)
+pnpm test          # 330 testes (os de Postgres, Redis e Docker rodam contra serviços reais e são ignorados sem eles)
 pnpm build
 ```
 
@@ -59,7 +59,7 @@ pnpm runner
 ```
 
 Sem `ANTHROPIC_API_KEY` o Runner usa o executor simulado (não gasta tokens). Com a chave (`RUNNER_EXECUTOR=agent`) ele roda o **agente**: várias interações com o modelo, ferramentas de arquivo num worktree Git isolado, comandos só num contêiner Docker (imagem local, sem rede) e aprovação humana para operações críticas. O resultado vem como patch para você revisar; nada é aplicado à sua pasta. Detalhes, variáveis e limites em [docs/RUNBOOK.md](docs/RUNBOOK.md#agente-e-sandbox-runner) e [ADR 0005](docs/adr/0005-agente-e-sandbox.md).
-Para ver o fluxo sem chave: `node apps/runner/scripts/e2e-agent.mjs` (modelo de demonstração, Docker local, 17 verificações).
+Para ver o fluxo sem chave: `node apps/runner/scripts/e2e-agent.mjs` (modelo de demonstração, Docker local, 21 verificações).
 
 ## Web, PWA e desktop
 
@@ -95,7 +95,7 @@ Ainda não feito (previsto no PRD):
 | Passkeys (WebAuthn), códigos de recuperação do MFA e login do Runner por código de dispositivo | Não implementados. O Runner usa token revogável |
 | Modelo de dados normalizado (Prisma) | Hoje os registros ficam em JSONB por tipo, sempre com `organization_id` |
 | Agente com o modelo real | Implementado e testado com respostas simuladas no formato da API; **a primeira execução com chave pode revelar ajustes** (esquemas estritos, autenticação do SDK, raciocínio entre turnos) |
-| Encadear tarefas e agentes (patch de uma tarefa visível na próxima, comunicação entre agentes) | Não implementado: cada tarefa de um plano parte do mesmo commit (Fase 4) |
+| Orquestração multiagente (Fase 4), partes restantes | Feito: tarefas encadeadas (a seguinte parte do commit da anterior, resultados combinados, texto do upstream tratado como dado). Falta: agente que cria subtarefas e replaneja, comunicação entre agentes em andamento, execução paralela comprovada com vários Runners (o commit só existe no Runner que rodou a tarefa) |
 | Sandbox mais forte que Docker comum (gVisor/Firecracker, imagem por digest) | Não implementado. O sandbox atual compartilha o kernel do Docker |
 | Claude Agent SDK / Claude Code como executor | Não usado de propósito (ADR 0005): o laço é próprio, sobre o SDK da Messages API |
 | Codex SDK, MCP, CLI `commandai`, Kanban, base de conhecimento, e-mail e Slack | Não implementados |

@@ -117,3 +117,94 @@ describe('createTaskWorkspace', () => {
     await ws.cleanup();
   });
 });
+
+describe('encadeamento: uma tarefa parte do resultado da anterior', () => {
+  const mk = (taskId: string, baseCommits?: string[]) => createTaskWorkspace({ workspacePath: repo, taskId, attempt: 1, dataDir: data, baseCommits });
+  const head = () => git(repo, 'rev-parse', 'HEAD').trim();
+
+  it('finalize registra o resultado num commit e numa referência própria, sem mexer no branch nem na árvore da pessoa', async () => {
+    const before = head();
+    const ws = await mk('e1:a');
+    writeFileSync(join(ws.root, 'novo.txt'), 'do agente\n');
+    const fin = await ws.finalize();
+    expect(fin.commit).toMatch(/^[0-9a-f]{40}$/);
+    expect(fin.commit).not.toBe(before);
+    expect(git(repo, 'rev-parse', 'refs/command-ai/e1_a-a1').trim()).toBe(fin.commit);
+    expect(head()).toBe(before); // o branch da pessoa não andou
+    expect(git(repo, 'status', '--porcelain').trim()).toBe(''); // árvore dela intacta
+    expect(existsSync(join(repo, 'novo.txt'))).toBe(false);
+    await ws.cleanup();
+  });
+
+  it('a tarefa seguinte enxerga o trabalho da anterior, e o patch dela traz só o que ela mesma mudou', async () => {
+    const a = await mk('e1:a');
+    writeFileSync(join(a.root, 'de-a.txt'), 'A\n');
+    const finA = await a.finalize();
+    const b = await mk('e1:b', [finA.commit!]);
+    expect(readFileSync(join(b.root, 'de-a.txt'), 'utf8')).toBe('A\n');
+    writeFileSync(join(b.root, 'de-b.txt'), 'B\n');
+    const finB = await b.finalize();
+    expect(finB.changedFiles).toBe(1);
+    expect(finB.patch).toContain('de-b.txt');
+    expect(finB.patch).not.toContain('de-a.txt');
+    // o commit final acumula as duas
+    expect(git(repo, 'ls-tree', '-r', '--name-only', finB.commit!)).toContain('de-a.txt');
+    await a.cleanup();
+    await b.cleanup();
+  });
+
+  it('sem mudanças, o commit devolvido é o da base (as dependentes continuam do mesmo ponto)', async () => {
+    const a = await mk('e1:a');
+    writeFileSync(join(a.root, 'de-a.txt'), 'A\n');
+    const finA = await a.finalize();
+    const b = await mk('e1:b', [finA.commit!]);
+    const finB = await b.finalize();
+    expect(finB.changedFiles).toBe(0);
+    expect(finB.commit).toBe(finA.commit);
+    await a.cleanup();
+    await b.cleanup();
+  });
+
+  it('commit que este Runner não tem: parte do HEAD e avisa', async () => {
+    const ws = await mk('e1:b', ['f'.repeat(40)]);
+    expect(ws.baseNote).toMatch(/não encontrado/i);
+    expect(readFileSync(join(ws.root, 'a.txt'), 'utf8')).toBe('original\n');
+    await ws.cleanup();
+  });
+
+  it('entrada que não é commit (opção do git, nome de ramo) nunca chega ao git', async () => {
+    for (const bad of ['--upload-pack=calc', 'main', 'HEAD~1', '../x']) {
+      const ws = await mk(`e1:${bad.replace(/\W/g, '')}`, [bad]);
+      expect(ws.baseNote).toMatch(/inválid|não encontrado/i);
+      await ws.cleanup();
+    }
+  });
+
+  it('duas dependências com arquivos diferentes são combinadas', async () => {
+    const a = await mk('e1:a');
+    writeFileSync(join(a.root, 'de-a.txt'), 'A\n');
+    const finA = await a.finalize();
+    const c = await mk('e1:c');
+    writeFileSync(join(c.root, 'de-c.txt'), 'C\n');
+    const finC = await c.finalize();
+    const d = await mk('e1:d', [finA.commit!, finC.commit!]);
+    expect(existsSync(join(d.root, 'de-a.txt'))).toBe(true);
+    expect(existsSync(join(d.root, 'de-c.txt'))).toBe(true);
+    await a.cleanup();
+    await c.cleanup();
+    await d.cleanup();
+  });
+
+  it('duas dependências que mexem na mesma linha: falha com mensagem de conflito e não deixa worktree', async () => {
+    const a = await mk('e1:a');
+    writeFileSync(join(a.root, 'a.txt'), 'versão do A\n');
+    const finA = await a.finalize();
+    const c = await mk('e1:c');
+    writeFileSync(join(c.root, 'a.txt'), 'versão do C\n');
+    const finC = await c.finalize();
+    await expect(mk('e1:d', [finA.commit!, finC.commit!])).rejects.toThrow(/conflito/i);
+    expect(existsSync(join(data, 'worktrees', 'e1_d-a1'))).toBe(false);
+    await a.cleanup();
+    await c.cleanup();
+  });
+});

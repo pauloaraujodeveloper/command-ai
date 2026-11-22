@@ -154,6 +154,8 @@ export interface Task {
   maxAttempts: number;
   approved: boolean;
   output?: string;
+  /** Commit com o trabalho desta tarefa (no repositório do Runner que a executou). Tarefas dependentes partem dele. */
+  workspaceCommit?: string;
   error?: string;
   runnerId?: string;
   /** Até quando a tarefa em execução vale sem heartbeat. Vencido, a varredura a devolve à fila. */
