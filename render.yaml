@@ -22,6 +22,9 @@ services:
       - key: SWEEP_IN_PROCESS
         value: "true"
       # Segredos: cole no painel do Render.
+      # Quem pode criar conta (e-mails separados por vírgula). Preencha no painel; o e-mail não fica no repositório.
+      - key: REGISTRATION_ALLOWED_EMAILS
+        sync: false
       - key: JOB_SIGNING_KEY # novo, aleatório, mínimo de 32 caracteres (não reutilize a chave de desenvolvimento)
         sync: false
       - key: DATABASE_URL_APP # papel restrito (RLS), gravado em .env.db-app por `db:create-app-role`

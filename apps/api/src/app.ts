@@ -75,6 +75,11 @@ export interface AppOptions {
    * quem já ativou nunca recebe sessão sem o código. Padrão: desligado; o servidor liga em produção.
    */
   requireMfa?: boolean;
+  /**
+   * Restringe a criação de contas (cadastro e primeiro acesso pelo Neon Auth) a estes e-mails. Contas que já existem
+   * entram normalmente. Vazio ou ausente: qualquer pessoa pode se cadastrar (padrão, bom para desenvolvimento).
+   */
+  registrationAllowedEmails?: string[];
 }
 
 /** CSP do app web servido pela API. Scripts só de 'self'; estilos inline são necessários para atributos style do React. */
@@ -480,10 +485,16 @@ export async function buildApp(opts: AppOptions) {
 
   app.get(`${api}/health`, async () => ({ status: 'ok', time: new Date().toISOString() }));
 
+  const allowedEmails = new Set((opts.registrationAllowedEmails ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean));
+  const mayRegister = (email: string) => allowedEmails.size === 0 || allowedEmails.has(email.toLowerCase());
+  // Mensagem genérica de propósito: não revela quais e-mails são autorizados.
+  const notAllowed = (reply: FastifyReply) => problem(reply, 403, 'registration_closed', 'O cadastro está fechado neste servidor.');
+
   /* ======================== autenticação ======================== */
 
   app.post(`${api}/auth/register`, async (req, reply) => {
     const body = parse(registerSchema, req.body);
+    if (!mayRegister(body.email)) return notAllowed(reply);
     const taken = () => problem(reply, 409, 'email_in_use', 'Não foi possível criar a conta com estes dados.');
     if (await repo.findUserByEmail(body.email)) return taken();
 
@@ -573,6 +584,7 @@ export async function buildApp(opts: AppOptions) {
 
     const existing = await repo.findUserByNeonSub(identity.sub);
     const conflict = () => problem(reply, 409, 'email_in_use', 'Já existe uma conta com este e-mail. Entre com a senha dela.');
+    if (!existing && !mayRegister(identity.email)) return notAllowed(reply);
     if (!existing && (await repo.findUserByEmail(identity.email))) return conflict();
 
     const totp = (req.body as { totp?: string } | undefined)?.totp;

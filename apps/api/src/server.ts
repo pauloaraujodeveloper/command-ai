@@ -93,7 +93,11 @@ if (webDist) console.log(`Servindo o app web de ${webDist}`);
 const requireMfa = process.env.REQUIRE_MFA ? process.env.REQUIRE_MFA === 'true' : production;
 if (production && !requireMfa) console.warn('[aviso] REQUIRE_MFA=false em produção: contas sem MFA terão acesso completo.');
 
-const built = await buildApp({ attemptLimiter, jobSigningKey, production, repo, neonAuth, webDist, neonAuthBaseUrl: process.env.NEON_AUTH_BASE_URL, requireMfa, orchestrator: orchestratorOptionsFromEnv() });
+/* ---- Cadastro: REGISTRATION_ALLOWED_EMAILS (lista separada por vírgula) fecha a criação de contas a esses e-mails ---- */
+const registrationAllowedEmails = (process.env.REGISTRATION_ALLOWED_EMAILS ?? '').split(',').map((e) => e.trim()).filter(Boolean);
+if (production && registrationAllowedEmails.length === 0) console.warn('[aviso] REGISTRATION_ALLOWED_EMAILS vazio em produção: qualquer pessoa que achar a URL pode criar uma conta.');
+
+const built = await buildApp({ attemptLimiter, jobSigningKey, production, repo, neonAuth, webDist, neonAuthBaseUrl: process.env.NEON_AUTH_BASE_URL, requireMfa, registrationAllowedEmails, orchestrator: orchestratorOptionsFromEnv() });
 const { app } = built;
 const port = Number(process.env.PORT ?? 3011);
 const host = process.env.HOST ?? '127.0.0.1';

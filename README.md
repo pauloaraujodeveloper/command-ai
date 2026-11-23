@@ -22,7 +22,7 @@ Requisitos: Node 22+ e pnpm 10 (`npm i -g pnpm`).
 
 ```powershell
 pnpm install
-pnpm test          # 564 testes (os de Postgres, Redis e Docker rodam contra serviços reais e são ignorados sem eles)
+pnpm test          # 569 testes (os de Postgres, Redis e Docker rodam contra serviços reais e são ignorados sem eles)
 pnpm build
 ```
 
