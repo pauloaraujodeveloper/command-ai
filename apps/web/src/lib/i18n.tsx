@@ -199,6 +199,7 @@ const ptBR = {
   'projects.name': 'Nome',
   'projects.path': 'Caminho do workspace',
   'projects.pathHint': 'O caminho precisa estar entre os diretórios autorizados do Runner.',
+  'projects.pick': 'Escolher pasta',
   'projects.new': 'Novo projeto',
   'projects.empty': 'Nenhum projeto cadastrado.',
 
@@ -451,6 +452,7 @@ const en: Record<MessageKey, string> = {
   'projects.name': 'Name',
   'projects.path': 'Workspace path',
   'projects.pathHint': 'The path must be inside the Runner’s allowed directories.',
+  'projects.pick': 'Choose folder',
   'projects.new': 'New project',
   'projects.empty': 'No projects yet.',
 

@@ -1,8 +1,8 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
-const { app, BrowserWindow, Menu, shell, session } = require('electron');
-const { isAllowedNavigation, isSafeExternalUrl, resolveAppUrl } = require('./config.cjs');
+const { app, BrowserWindow, Menu, shell, session, dialog, ipcMain } = require('electron');
+const { isAllowedNavigation, isSafeExternalUrl, resolveAppUrl, isTrustedSender, folderFromDialog } = require('./config.cjs');
 
 const OFFLINE_FILE = path.join(__dirname, 'offline.html');
 const SMOKE = process.env.COMMAND_AI_SMOKE === '1';
@@ -55,6 +55,7 @@ function createWindow() {
     webPreferences: {
       // O app web é tratado como conteúdo não confiável para o sistema: sem Node, isolado e em sandbox.
       contextIsolation: true,
+      preload: path.join(__dirname, 'preload.cjs'),
       sandbox: true,
       nodeIntegration: false,
       webSecurity: true,
@@ -134,6 +135,13 @@ if (appUrl) {
       // Nenhuma permissão do navegador (câmera, microfone, localização…) é concedida.
       session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
       buildMenu();
+      // Seletor de pasta para o cadastro de projetos: só atende a página do servidor configurado e devolve apenas o caminho.
+      ipcMain.handle('command-ai:pick-folder', async (event) => {
+        const sender = event.senderFrame ? event.senderFrame.url : '';
+        if (!isTrustedSender(sender, appUrl)) return null;
+        const result = await dialog.showOpenDialog(win, { title: 'Escolher a pasta do projeto', properties: ['openDirectory'] });
+        return folderFromDialog(result);
+      });
       createWindow();
 
       if (SMOKE) {
@@ -141,9 +149,9 @@ if (appUrl) {
           setTimeout(async () => {
             try {
               const info = await win.webContents.executeJavaScript(
-                `({ title: document.title, rootChildren: document.getElementById('root')?.children.length ?? 0, url: location.href, hasNode: typeof require !== 'undefined' || typeof process !== 'undefined' })`,
+                `({ title: document.title, rootChildren: document.getElementById('root')?.children.length ?? 0, url: location.href, hasNode: typeof require !== 'undefined' || typeof process !== 'undefined', hasPicker: typeof window.commandAIDesktop?.pickFolder === 'function', bridgeKeys: Object.keys(window.commandAIDesktop || {}) })`,
               );
-              const ok = info.title === 'Command AI' && info.rootChildren > 0 && !info.hasNode;
+              const ok = info.title === 'Command AI' && info.rootChildren > 0 && !info.hasNode && info.hasPicker && info.bridgeKeys.length === 1;
               console.log(JSON.stringify({ ok, ...info }));
               app.exit(ok ? 0 : 1);
             } catch (err) {

@@ -172,7 +172,7 @@ Para ajustar um agente existente, clique no **lápis** ao lado dele. Lá você m
 Abra **Projetos** e clique em **Novo projeto**:
 
 - **Nome**.
-- **Caminho do workspace:** a pasta do projeto no seu computador (por exemplo, `C:\Users\voce\meu-site`). Ela precisa estar dentro das pastas liberadas no `RUNNER_ALLOWED_WORKSPACES`.
+- **Caminho do workspace:** a pasta do projeto no seu computador (por exemplo, `C:\Users\voce\meu-site`). Ela precisa estar dentro das pastas liberadas no `RUNNER_ALLOWED_WORKSPACES`. **No app desktop** há o botão **Escolher pasta**, que abre a janela do Windows para você selecionar a pasta. No navegador e no PWA não há esse botão (limite de segurança do navegador): copie o caminho no Explorador de Arquivos e cole no campo.
 - A pasta precisa ser um **repositório Git com pelo menos um commit**. Sem isso, os agentes só conseguem ler.
 
 **PRD (descrição do projeto):** em **Editar PRD**, cole um texto explicando o que o sistema é e o que deve fazer. O orquestrador recebe o texto completo e cada especialista, a parte que importa para ele. Quanto melhor o PRD, melhor o trabalho.

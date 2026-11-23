@@ -69,6 +69,12 @@ function ContextEditor({ project, onSaved }: { project: Project; onSaved: () => 
   );
 }
 
+/** Ponte do app desktop (preload): abre o seletor de pastas do sistema. Fora do desktop não existe. */
+interface DesktopBridge {
+  pickFolder: () => Promise<string | null>;
+}
+const desktop = (): DesktopBridge | undefined => (window as unknown as { commandAIDesktop?: DesktopBridge }).commandAIDesktop;
+
 export function Projects() {
   const { t } = useI18n();
   const projects = useQuery(() => api<{ items: Project[] }>('/projects'));
@@ -117,7 +123,21 @@ export function Projects() {
             <input required className={inputCls} value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
           </Field>
           <Field label={t('projects.path')} hint={t('projects.pathHint')}>
-            <input required className={`${inputCls} font-mono`} value={workspacePath} onChange={(e) => setWorkspacePath(e.target.value)} maxLength={500} />
+            <div className="flex gap-2">
+              <input required className={`${inputCls} font-mono`} value={workspacePath} onChange={(e) => setWorkspacePath(e.target.value)} maxLength={500} />
+              {desktop() && (
+                <Button
+                  type="button"
+                  onClick={async () => {
+                    const picked = await desktop()?.pickFolder();
+                    if (picked) setWorkspacePath(picked);
+                  }}
+                  className="shrink-0"
+                >
+                  {t('projects.pick')}
+                </Button>
+              )}
+            </div>
           </Field>
           {error && <ErrorNote message={error} />}
           <Button type="submit" variant="primary" disabled={busy}>

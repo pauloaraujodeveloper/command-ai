@@ -9,8 +9,8 @@
     "start": "electron .",
     "dev": "electron .",
     "test": "node --test",
-    "typecheck": "node --check main.cjs && node --check config.cjs",
-    "build": "node --check main.cjs && node --check config.cjs",
+    "typecheck": "node --check main.cjs && node --check config.cjs && node --check preload.cjs",
+    "build": "node --check main.cjs && node --check config.cjs && node --check preload.cjs",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win zip",
     "dist:win:installer": "electron-builder --win nsis",
@@ -29,6 +29,7 @@
     "files": [
       "main.cjs",
       "config.cjs",
+      "preload.cjs",
       "offline.html",
       "package.json"
     ],

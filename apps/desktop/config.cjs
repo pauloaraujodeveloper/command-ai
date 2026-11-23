@@ -63,4 +63,20 @@ function isSafeExternalUrl(target) {
   }
 }
 
-module.exports = { DEFAULT_URL, normalizeAppUrl, resolveAppUrl, isAllowedNavigation, isSafeExternalUrl };
+/** Só a página do próprio servidor configurado pode pedir o seletor de pasta (nunca outra origem nem a tela offline). */
+function isTrustedSender(senderUrl, appUrl) {
+  try {
+    return new URL(String(senderUrl)).origin === new URL(appUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
+/** Extrai a pasta do resultado de dialog.showOpenDialog; null se cancelou ou não veio caminho. */
+function folderFromDialog(result) {
+  if (!result || result.canceled) return null;
+  const first = Array.isArray(result.filePaths) ? result.filePaths[0] : undefined;
+  return typeof first === 'string' && first ? first : null;
+}
+
+module.exports = { DEFAULT_URL, normalizeAppUrl, resolveAppUrl, isAllowedNavigation, isSafeExternalUrl, isTrustedSender, folderFromDialog };

@@ -70,3 +70,26 @@ describe('resolveAppUrl', () => {
     assert.throws(() => resolveAppUrl({ env: 'http://remoto.example' }));
   });
 });
+
+describe('seletor de pasta (só para a página do próprio servidor)', () => {
+  const { isTrustedSender, folderFromDialog } = require('../config.cjs');
+
+  it('confia só em quem está na origem do servidor configurado', () => {
+    assert.equal(isTrustedSender('http://127.0.0.1:3011/projetos', 'http://127.0.0.1:3011/'), true);
+    assert.equal(isTrustedSender('https://app.exemplo.com/x', 'https://app.exemplo.com/'), true);
+  });
+
+  it('recusa outra origem, porta diferente, esquema diferente, file:// e lixo', () => {
+    for (const bad of ['https://evil.example/', 'http://127.0.0.1:9999/', 'https://127.0.0.1:3011/', 'file:///C:/offline.html', 'about:blank', '', undefined, null, 'não é url']) {
+      assert.equal(isTrustedSender(bad, 'http://127.0.0.1:3011/'), false, String(bad));
+    }
+  });
+
+  it('devolve a primeira pasta escolhida, ou null se cancelou ou veio vazio', () => {
+    assert.equal(folderFromDialog({ canceled: false, filePaths: ['C:\proj\site'] }), 'C:\proj\site');
+    assert.equal(folderFromDialog({ canceled: true, filePaths: ['C:/x'] }), null);
+    assert.equal(folderFromDialog({ canceled: false, filePaths: [] }), null);
+    assert.equal(folderFromDialog(undefined), null);
+    assert.equal(folderFromDialog({ canceled: false, filePaths: [123] }), null);
+  });
+});
