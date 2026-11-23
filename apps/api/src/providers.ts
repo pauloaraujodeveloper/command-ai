@@ -11,7 +11,7 @@ export interface ProviderCapabilities {
   usageMetrics: boolean;
 }
 
-export const CAPABILITIES: Record<'anthropic' | 'openai' | 'deepseek' | 'ollama' | 'claude_code' | 'simulated', ProviderCapabilities> = {
+export const CAPABILITIES: Record<'anthropic' | 'openai' | 'deepseek' | 'ollama' | 'claude_code' | 'codex' | 'simulated', ProviderCapabilities> = {
   anthropic: {
     streaming: true,
     toolCalling: true,
@@ -47,6 +47,18 @@ export const CAPABILITIES: Record<'anthropic' | 'openai' | 'deepseek' | 'ollama'
   },
   // Claude Code pela assinatura do plano mensal (CLI local, sem chave): só ferramentas de arquivo, sem comandos, sem subtarefas, sem mensagens.
   claude_code: {
+    streaming: true,
+    toolCalling: true,
+    structuredOutput: false,
+    sessions: false,
+    codeExecution: false,
+    mcp: false,
+    subagents: false,
+    cancellation: true,
+    usageMetrics: true,
+  },
+  // Codex pela assinatura ChatGPT (CLI local, sem chave): arquivos pelo sandbox do próprio Codex (sem o shell dele); comandos, apagar, subtarefas e mensagens pelas ferramentas do Runner (MCP).
+  codex: {
     streaming: true,
     toolCalling: true,
     structuredOutput: false,

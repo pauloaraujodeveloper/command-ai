@@ -117,9 +117,13 @@ describe('DockerSandbox: contêiner real', async () => {
       const r = await go('sleep 60', { timeoutMs: 2000 });
       expect(r.timedOut).toBe(true);
       expect(r.durationMs).toBeLessThan(15_000);
-      await new Promise((res) => setTimeout(res, 2500));
-      const { stdout } = await run('docker', ['ps', '-a', '--filter', 'name=ca-sbx-', '--format', '{{.Names}}'], { windowsHide: true });
-      expect(stdout.trim()).toBe('');
+      // O contêiner é removido de forma assíncrona: espera por condição (até 20 s) em vez de um tempo fixo, que falhava com o Docker ocupado.
+      let leftover = 'x';
+      for (let i = 0; i < 40 && leftover !== ''; i++) {
+        leftover = (await run('docker', ['ps', '-a', '--filter', 'name=ca-sbx-', '--format', '{{.Names}}'], { windowsHide: true })).stdout.trim();
+        if (leftover !== '') await new Promise((res) => setTimeout(res, 500));
+      }
+      expect(leftover).toBe('');
     }, 40_000);
 
     it('cancelamento pelo signal interrompe o comando', async () => {
@@ -145,9 +149,13 @@ describe('DockerSandbox: contêiner real', async () => {
       const r = await go('while :; do sleep 30 & done', { timeoutMs: 6000 });
       expect(r.timedOut || r.exitCode !== 0).toBe(true);
       expect(r.durationMs).toBeLessThan(30_000);
-      await new Promise((res) => setTimeout(res, 2500));
-      const { stdout } = await run('docker', ['ps', '-a', '--filter', 'name=ca-sbx-', '--format', '{{.Names}}'], { windowsHide: true });
-      expect(stdout.trim()).toBe('');
+      // O contêiner é removido de forma assíncrona: espera por condição (até 20 s) em vez de um tempo fixo, que falhava com o Docker ocupado.
+      let leftover = 'x';
+      for (let i = 0; i < 40 && leftover !== ''; i++) {
+        leftover = (await run('docker', ['ps', '-a', '--filter', 'name=ca-sbx-', '--format', '{{.Names}}'], { windowsHide: true })).stdout.trim();
+        if (leftover !== '') await new Promise((res) => setTimeout(res, 500));
+      }
+      expect(leftover).toBe('');
     }, 60_000);
   });
 });

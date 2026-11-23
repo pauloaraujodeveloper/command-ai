@@ -76,12 +76,12 @@ export class RedisLimiter implements AttemptLimiter {
   private readonly windowMs: number;
   private readonly prefix: string;
 
-  constructor(opts: LimiterOptions & { url: string; prefix?: string; onError?: (err: unknown) => void }) {
+  constructor(opts: LimiterOptions & { url: string; prefix?: string; onError?: (err: unknown) => void; commandTimeoutMs?: number }) {
     this.max = opts.max;
     this.windowMs = opts.windowMs;
     this.prefix = opts.prefix ?? 'command-ai:rl';
     // Poucas tentativas e prazo curto: o login não pode ficar pendurado esperando um Redis fora do ar.
-    this.redis = new Redis(opts.url, { maxRetriesPerRequest: 1, connectTimeout: 2_000, commandTimeout: 1_500 });
+    this.redis = new Redis(opts.url, { maxRetriesPerRequest: 1, connectTimeout: 2_000, commandTimeout: opts.commandTimeoutMs ?? 1_500 });
     this.redis.on('error', opts.onError ?? (() => undefined));
   }
 

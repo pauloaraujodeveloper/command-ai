@@ -21,7 +21,7 @@ const agentBody = (providerKind: string, model = 'm') => ({ name: `Ag ${provider
 describe('provedores de modelo', () => {
   it('aceita agentes de todos os provedores e recusa um desconhecido', async () => {
     const h = await user();
-    for (const kind of ['anthropic', 'openai', 'deepseek', 'ollama', 'claude_code', 'simulated']) {
+    for (const kind of ['anthropic', 'openai', 'deepseek', 'ollama', 'claude_code', 'codex', 'simulated']) {
       expect((await app.inject({ method: 'POST', url: '/api/v1/agents', headers: h, payload: agentBody(kind) })).statusCode, kind).toBe(201);
     }
     expect((await app.inject({ method: 'POST', url: '/api/v1/agents', headers: h, payload: agentBody('coisa') })).statusCode).toBe(400);

@@ -152,7 +152,7 @@ export const loginSchema = z.object({
 export const mfaActivateSchema = z.object({ code: z.string().regex(/^\d{6}$/) });
 
 export const providerSchema = z.object({
-  kind: z.enum(['anthropic', 'openai', 'deepseek', 'ollama', 'claude_code', 'simulated']),
+  kind: z.enum(['anthropic', 'openai', 'deepseek', 'ollama', 'claude_code', 'codex', 'simulated']),
   name: z.string().trim().min(1).max(80),
   /** Nome da variável de ambiente do Runner que guarda a chave. A chave em si nunca é armazenada. */
   apiKeyRef: z
@@ -166,7 +166,7 @@ export const agentSchema = z.object({
   name: z.string().trim().min(1).max(80),
   role: z.string().trim().min(1).max(120),
   instructions: z.string().trim().min(1).max(8000),
-  providerKind: z.enum(['anthropic', 'openai', 'deepseek', 'ollama', 'claude_code', 'simulated']),
+  providerKind: z.enum(['anthropic', 'openai', 'deepseek', 'ollama', 'claude_code', 'codex', 'simulated']),
   model: z.string().trim().min(1).max(80),
   fallbackModels: z.array(z.string().trim().min(1).max(80)).max(5).default([]),
   budgetUsd: z.number().positive().max(10_000).default(5),

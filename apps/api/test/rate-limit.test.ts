@@ -57,7 +57,7 @@ describe('MemoryLimiter', () => {
 describe.skipIf(!HAS_REDIS)('RedisLimiter (Redis real)', () => {
   const closers: Array<() => Promise<void>> = [];
   const mk = (p: string, over: { max?: number; windowMs?: number } = {}) => {
-    const l = new RedisLimiter({ url: REDIS_URL, max: over.max ?? 3, windowMs: over.windowMs ?? 60_000, prefix: p });
+    const l = new RedisLimiter({ url: REDIS_URL, max: over.max ?? 3, windowMs: over.windowMs ?? 60_000, prefix: p, commandTimeoutMs: 15_000 }); // folgado: com a suíte inteira rodando, 1,5 s podia estourar
     closers.push(() => l.close());
     return l;
   };
@@ -162,7 +162,7 @@ describe.skipIf(!HAS_REDIS)('login com duas instâncias da API e um limitador co
   const H = { 'x-command-ai': '1', 'content-type': 'application/json' };
 
   async function instance(p: string) {
-    const limiter = new RedisLimiter({ url: REDIS_URL, max: 10, windowMs: 60_000, prefix: p });
+    const limiter = new RedisLimiter({ url: REDIS_URL, max: 10, windowMs: 60_000, prefix: p, commandTimeoutMs: 15_000 });
     closers.push(() => limiter.close());
     const { app } = await buildApp({ jobSigningKey: 'rate-limit-test-signing-key-long-12345', production: false, logger: false, attemptLimiter: limiter });
     apps.push(app);

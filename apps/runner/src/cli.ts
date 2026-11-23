@@ -8,6 +8,7 @@ import { agentExecutor } from './agent/executor.ts';
 import { createModelFor, providerCheck } from './agent/providers.ts';
 import { DockerSandbox, probeDocker, type Sandbox } from './agent/sandbox.ts';
 import { claudeCodeExecutor } from './agent/claude-code.ts';
+import { codexExecutor, resolveCodexCommand } from './agent/codex-cli.ts';
 import { routeExecutor } from './agent/route.ts';
 import { simulatedExecutor } from './executors.ts';
 import { processNextJob, type RunnerClient } from './runner.ts';
@@ -126,7 +127,23 @@ try {
 } catch {
   /* não instalado */
 }
-const mode = process.env.RUNNER_EXECUTOR ?? (anyProvider || claudeVersion ? 'agent' : 'simulated');
+// Codex instalado (assinatura ChatGPT): versão e se há login (o login só a pessoa faz: `codex login`).
+let codexVersion: string | null = null;
+let codexLogin = 'não verificado';
+try {
+  const c = resolveCodexCommand();
+  const run = (extra: string[]) => execFileSync(c.file, [...(c.prefixArgs ?? []), ...extra], { timeout: 15_000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim();
+  codexVersion = run(['--version']).split(/\r?\n/)[0] ?? null;
+  try {
+    codexLogin = run(['login', 'status']).split(/\r?\n/)[0] ?? 'sem login';
+  } catch (e) {
+    const out = String((e as { stdout?: Buffer; stderr?: Buffer }).stdout ?? '') + String((e as { stderr?: Buffer }).stderr ?? '');
+    codexLogin = (out.trim().split(/\r?\n/)[0] || 'sem login').slice(0, 80);
+  }
+} catch {
+  /* não instalado */
+}
+const mode = process.env.RUNNER_EXECUTOR ?? (anyProvider || claudeVersion || codexVersion ? 'agent' : 'simulated');
 const num = (name: string, fallback: number) => {
   const v = Number(process.env[name]);
   return Number.isFinite(v) && v > 0 ? v : fallback;
@@ -147,8 +164,8 @@ if (process.env.RUNNER_SANDBOX !== 'off') {
 
 let executor = simulatedExecutor;
 if (mode === 'agent' || mode === 'agent-demo') {
-  if (mode === 'agent' && !anyProvider && !claudeVersion) {
-    console.error('RUNNER_EXECUTOR=agent exige a chave de ao menos um provedor (ANTHROPIC_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY), OLLAMA_BASE_URL ou o Claude Code instalado e logado.');
+  if (mode === 'agent' && !anyProvider && !claudeVersion && !codexVersion) {
+    console.error('RUNNER_EXECUTOR=agent exige a chave de ao menos um provedor (ANTHROPIC_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY), OLLAMA_BASE_URL o Claude Code ou o Codex instalados e logados.');
     process.exit(1);
   }
   executor = agentExecutor({
@@ -178,12 +195,21 @@ const claudeExec = claudeCodeExecutor({
   approvalPollMs: num('RUNNER_APPROVAL_POLL_MS', 2000),
   approvalTimeoutMs: num('RUNNER_APPROVAL_TIMEOUT_MS', 15 * 60_000),
 });
-executor = routeExecutor({ mode, base: baseExecutor, claude: claudeExec, simulated: simulatedExecutor });
+const codexExec = codexExecutor({
+  dataDir: process.env.RUNNER_DATA_DIR ?? join(homedir(), '.command-ai-runner'),
+  timeoutMs: num('RUNNER_TASK_TIMEOUT_MS', 30 * 60_000),
+  sandbox,
+  commandTimeoutMs: num('RUNNER_COMMAND_TIMEOUT_MS', 300_000),
+  approvalPollMs: num('RUNNER_APPROVAL_POLL_MS', 2000),
+  approvalTimeoutMs: num('RUNNER_APPROVAL_TIMEOUT_MS', 15 * 60_000),
+});
+executor = routeExecutor({ mode, base: baseExecutor, claude: claudeExec, codex: codexExec, simulated: simulatedExecutor });
 console.log(`Runner conectado a ${apiUrl}`);
 console.log(`Executor: ${mode === 'agent' ? 'agente (modelo escolhido pelo provedor de cada agente)' : mode === 'agent-demo' ? 'agente de demonstração (roteiro fixo, sem chave)' : 'simulado (defina a chave de um provedor, por exemplo ANTHROPIC_API_KEY, para o agente real)'}`);
 if (mode !== 'simulated') console.log(`Sandbox de comandos: ${sandboxNote}`);
 if (mode === 'agent') {
   for (const line of providerCheck()) console.log(`Provedor ${line}`);
+  console.log(`Provedor codex: ${codexVersion ? `${codexVersion} (assinatura local; login: ${codexLogin})` : 'não encontrado (npm i -g @openai/codex e codex login)'}`);
   console.log(`Provedor claude_code: ${claudeVersion ? `Claude Code ${claudeVersion} (assinatura local, sem chave)` : 'não encontrado (instale e faça login, ou defina RUNNER_CLAUDE_BIN)'}`);
 }
 console.log(`Workspaces autorizados: ${allowedWorkspaces.join(', ')}`);
