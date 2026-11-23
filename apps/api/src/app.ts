@@ -5,7 +5,10 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { ZodError, type ZodTypeAny, type z } from 'zod';
 import {
+  agentPatchSchema,
   agentSchema,
+  MAX_AGENT_DEPTH,
+  projectPatchSchema,
   createExecutionSchema,
   decideApprovalSchema,
   loginSchema,
@@ -40,7 +43,7 @@ import { Orchestrator, OrchestratorError, type OrchestratorOptions } from './orc
 import { MemoryLimiter, type AttemptLimiter } from './rate-limit.ts';
 import { AGENT_TEMPLATES, CAPABILITIES } from './providers.ts';
 import { MemoryRepo, type Repo, type UnitContext, type UnitHandle } from './repo.ts';
-import { createStore, type Store, type User } from './store.ts';
+import { createStore, type Agent, type Project, type Store, type User } from './store.ts';
 
 export interface AppOptions {
   jobSigningKey: string;
@@ -717,13 +720,71 @@ export async function buildApp(opts: AppOptions) {
     return { items: store.agents.filter((a) => a.organizationId === auth.organizationId) };
   });
 
+  /* ---------- hierarquia de agentes ---------- */
+  const lc = (s: string | undefined) => (s ?? '').toLowerCase();
+  const childrenOf = (id: string) => store.agents.filter((a) => a.parentAgentId === id);
+  const descendantsOf = (id: string): Agent[] => childrenOf(id).flatMap((c) => [c, ...descendantsOf(c.id)]);
+  const depthOf = (a: Agent): number => (a.parentAgentId && store.agents.get(a.parentAgentId) ? 1 + depthOf(store.agents.get(a.parentAgentId)!) : 1);
+  const heightOf = (a: Agent): number => 1 + Math.max(0, ...childrenOf(a.id).map(heightOf));
+
+  /** Confere pai, tipo, ciclo, profundidade e domínio repetido entre irmãos. Devolve o erro ou null. */
+  function checkHierarchy(orgId: string, self: Agent | null, next: { kind: string; domain?: string; parentAgentId?: string }): { status: number; code: string; detail: string } | null {
+    let parent: Agent | undefined;
+    if (next.parentAgentId) {
+      parent = store.agents.get(next.parentAgentId);
+      if (!parent || parent.organizationId !== orgId) return { status: 404, code: 'not_found', detail: 'Orquestrador pai não encontrado.' };
+      if ((parent.kind ?? 'specialist') !== 'orchestrator') return { status: 422, code: 'invalid_hierarchy', detail: 'Só um agente do tipo orquestrador pode ter agentes subordinados.' };
+      if (self && (parent.id === self.id || descendantsOf(self.id).some((d) => d.id === parent!.id))) return { status: 422, code: 'invalid_hierarchy', detail: 'A hierarquia não pode ter ciclo.' };
+    }
+    const height = self ? heightOf(self) : 1;
+    if ((parent ? depthOf(parent) : 0) + height > MAX_AGENT_DEPTH) return { status: 422, code: 'invalid_hierarchy', detail: `A hierarquia pode ter no máximo ${MAX_AGENT_DEPTH} níveis.` };
+    if (self && next.kind !== 'orchestrator' && childrenOf(self.id).length > 0) return { status: 422, code: 'invalid_hierarchy', detail: 'Um agente com subordinados precisa continuar sendo orquestrador.' };
+    if (next.domain) {
+      const clash = store.agents.filter((a) => a.organizationId === orgId && a.id !== self?.id && (a.parentAgentId ?? '') === (next.parentAgentId ?? '') && lc(a.domain) === lc(next.domain));
+      if (clash.length > 0) return { status: 409, code: 'domain_in_use', detail: `Já existe um agente com o domínio "${next.domain}" neste nível.` };
+    }
+    return null;
+  }
+
   app.post(`${api}/agents`, async (req, reply) => {
     const auth = authOf(req, reply, WRITE_ROLES);
     if (!auth) return reply;
     const body = parse(agentSchema, req.body);
+    const bad = checkHierarchy(auth.organizationId, null, body);
+    if (bad) return problem(reply, bad.status, bad.code, bad.detail);
     const agent = store.agents.insert({ id: randomUUID(), organizationId: auth.organizationId, ...body });
     store.audit({ organizationId: auth.organizationId, actor: auth.userId, action: 'agent.created', target: agent.id });
     return reply.code(201).send(agent);
+  });
+
+  app.patch(`${api}/agents/:id`, async (req, reply) => {
+    const auth = authOf(req, reply, WRITE_ROLES);
+    if (!auth) return reply;
+    const current = store.agents.get((req.params as { id: string }).id);
+    if (!current || current.organizationId !== auth.organizationId) return problem(reply, 404, 'not_found', 'Agente não encontrado.');
+    const body = parse(agentPatchSchema, req.body);
+    // null apaga o campo; ausente mantém.
+    const patch: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(body)) patch[k] = v === null ? undefined : v;
+    const merged = { ...current, ...patch } as Agent;
+    const bad = checkHierarchy(auth.organizationId, current, { kind: merged.kind ?? 'specialist', domain: merged.domain, parentAgentId: merged.parentAgentId });
+    if (bad) return problem(reply, bad.status, bad.code, bad.detail);
+    const next = store.agents.update(current.id, patch as Partial<Agent>);
+    store.audit({ organizationId: auth.organizationId, actor: auth.userId, action: 'agent.updated', target: current.id });
+    return next;
+  });
+
+  app.delete(`${api}/agents/:id`, async (req, reply) => {
+    const auth = authOf(req, reply, WRITE_ROLES);
+    if (!auth) return reply;
+    const current = store.agents.get((req.params as { id: string }).id);
+    if (!current || current.organizationId !== auth.organizationId) return problem(reply, 404, 'not_found', 'Agente não encontrado.');
+    if (childrenOf(current.id).length > 0) return problem(reply, 409, 'agent_in_use', 'Este agente tem subordinados: mova ou apague-os antes.');
+    const used = store.tasks.filter((t) => t.agentId === current.id).length + store.executions.filter((e) => e.agentId === current.id).length;
+    if (used > 0) return problem(reply, 409, 'agent_in_use', 'Este agente já foi usado em execuções e não pode ser apagado.');
+    store.agents.delete(current.id);
+    store.audit({ organizationId: auth.organizationId, actor: auth.userId, action: 'agent.deleted', target: current.id });
+    return reply.code(204).send();
   });
 
   app.get(`${api}/projects`, async (req, reply) => {
@@ -739,6 +800,19 @@ export async function buildApp(opts: AppOptions) {
     const project = store.projects.insert({ id: randomUUID(), organizationId: auth.organizationId, ...body });
     store.audit({ organizationId: auth.organizationId, actor: auth.userId, action: 'project.created', target: project.id });
     return reply.code(201).send(project);
+  });
+
+  app.patch(`${api}/projects/:id`, async (req, reply) => {
+    const auth = authOf(req, reply, WRITE_ROLES);
+    if (!auth) return reply;
+    const current = store.projects.get((req.params as { id: string }).id);
+    if (!current || current.organizationId !== auth.organizationId) return problem(reply, 404, 'not_found', 'Projeto não encontrado.');
+    const body = parse(projectPatchSchema, req.body);
+    const patch: Partial<Project> = { ...body };
+    if (body.context !== undefined && body.context.trim() === '') patch.context = undefined; // vazio limpa
+    const next = store.projects.update(current.id, patch);
+    store.audit({ organizationId: auth.organizationId, actor: auth.userId, action: 'project.updated', target: current.id });
+    return next;
   });
 
   /* ======================== execuções ======================== */
@@ -1054,9 +1128,27 @@ export async function buildApp(opts: AppOptions) {
           ...(t.workspaceCommit ? { commit: t.workspaceCommit } : {}),
         };
       });
+    const profile = (a: Agent) => ({
+      id: a.id,
+      name: a.name,
+      kind: a.kind ?? 'specialist',
+      ...(a.domain ? { domain: a.domain } : {}),
+      ...(a.responsibilities ? { responsibilities: a.responsibilities } : {}),
+      ...(a.writeScopes ? { writeScopes: a.writeScopes } : {}),
+      dependsOnDomains: a.dependsOnDomains ?? [],
+    });
+    const parent = agent.parentAgentId ? store.agents.get(agent.parentAgentId) : undefined;
+    // Equipe: o orquestrador vê os subordinados diretos; um especialista vê os colegas do mesmo orquestrador.
+    const team = ((agent.kind ?? 'specialist') === 'orchestrator' ? childrenOf(agent.id) : parent ? childrenOf(parent.id).filter((c) => c.id !== agent.id) : []).map(profile);
+    // PRD do projeto: inteiro para o orquestrador, só um trecho para os especialistas (a equipe pergunta ao orquestrador o que faltar).
+    const ctxLimit = (agent.kind ?? 'specialist') === 'orchestrator' ? 60_000 : 12_000;
+    const fullContext = project.context ?? '';
     const job = signJob(
       {
         taskId: task.id,
+        agent: { ...profile(agent), ...(parent ? { parent: { id: parent.id, name: parent.name, ...(parent.domain ? { domain: parent.domain } : {}) } } : {}) },
+        team,
+        ...(fullContext ? { projectContext: fullContext.slice(0, ctxLimit), projectContextTruncated: fullContext.length > ctxLimit } : {}),
         // Só o TIPO do provedor: chave, nome de variável e endereço vêm do ambiente do Runner, nunca do servidor.
         provider: agent.providerKind,
         upstream,
@@ -1135,11 +1227,27 @@ export async function buildApp(opts: AppOptions) {
     if (!task) return reply;
     const body = parse(subtasksRequestSchema, req.body);
     const specs = [];
+    // Quem pode receber trabalho: dentro de uma hierarquia, o próprio agente e os subordinados (não escala para o resto da organização).
+    const creator = store.agents.get(task.agentId)!;
+    const inHierarchy = !!creator.parentAgentId || childrenOf(creator.id).length > 0;
+    const pool = inHierarchy ? [creator, ...descendantsOf(creator.id)] : store.agents.filter((a) => a.organizationId === runner.organizationId);
     for (const t of body.tasks) {
-      const agentId = t.agentId ?? task.agentId;
-      const agent = store.agents.get(agentId);
-      if (!agent || agent.organizationId !== runner.organizationId) return problem(reply, 404, 'not_found', 'Agente não encontrado.');
-      specs.push({ id: t.id, title: t.title, agentId, dependsOn: t.dependsOn, risk: t.risk });
+      let target: Agent | undefined;
+      if (t.agent) {
+        const q = lc(t.agent);
+        const byDomain = pool.filter((a) => lc(a.domain) === q);
+        const matches = byDomain.length > 0 ? byDomain : pool.filter((a) => lc(a.name) === q);
+        if (matches.length > 1) return problem(reply, 422, 'ambiguous_agent', `Mais de um agente responde por "${t.agent}": use o domínio ou o agentId.`);
+        target = matches[0];
+        if (!target) {
+          const options = pool.map((a) => (a.domain ? `${a.domain} (${a.name})` : a.name)).slice(0, 20).join(', ');
+          return problem(reply, 404, 'not_found', `Agente "${t.agent}" não encontrado na equipe. Disponíveis: ${options}.`);
+        }
+      } else {
+        target = t.agentId ? pool.find((a) => a.id === t.agentId) : creator;
+        if (!target) return problem(reply, 404, 'not_found', 'Agente não encontrado na equipe.');
+      }
+      specs.push({ id: t.id, title: t.title, agentId: target.id, dependsOn: t.dependsOn, risk: t.risk });
     }
     const added = orchestrator.addSubtasks(task.id, specs, { attempt: body.attempt });
     store.audit({ organizationId: runner.organizationId, actor: `runner:${runner.id}`, action: 'plan.subtasks_added', target: task.id });

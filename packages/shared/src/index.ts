@@ -162,19 +162,70 @@ export const providerSchema = z.object({
   defaultModel: z.string().trim().min(1).max(80),
 });
 
+export const AGENT_KINDS = ['orchestrator', 'specialist'] as const;
+export type AgentKind = (typeof AGENT_KINDS)[number];
+export const MAX_AGENT_DEPTH = 4;
+export const PROVIDER_KINDS = ['anthropic', 'openai', 'deepseek', 'ollama', 'claude_code', 'codex', 'simulated'] as const;
+
+/** Padrão de caminho que o agente pode alterar (relativo ao workspace; `*`, `**` e `?`). Sem caminho absoluto, unidade, `..` nem caracteres de controle. */
+export const writeScopeSchema = z
+  .string()
+  .min(1)
+  .max(200)
+  .refine((s) => !/[\u0000-\u001f]/.test(s), 'caracteres de controle não são permitidos')
+  .refine((s) => !/^([\\/]|[A-Za-z]:)/.test(s), 'use caminho relativo ao workspace')
+  .refine((s) => !s.split(/[\\/]+/).includes('..'), 'não use ".." no caminho');
+export const domainSchema = z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/, 'domínio: letras, números, _ e - (até 40)');
+
 export const agentSchema = z.object({
   name: z.string().trim().min(1).max(80),
   role: z.string().trim().min(1).max(120),
   instructions: z.string().trim().min(1).max(8000),
-  providerKind: z.enum(['anthropic', 'openai', 'deepseek', 'ollama', 'claude_code', 'codex', 'simulated']),
+  providerKind: z.enum(PROVIDER_KINDS),
   model: z.string().trim().min(1).max(80),
   fallbackModels: z.array(z.string().trim().min(1).max(80)).max(5).default([]),
   budgetUsd: z.number().positive().max(10_000).default(5),
+  /** Orquestrador planeja e delega; especialista executa. */
+  kind: z.enum(AGENT_KINDS).default('specialist'),
+  /** Área de atuação (frontend, backend, database, infra…): é como o orquestrador o chama ao delegar. */
+  domain: domainSchema.optional(),
+  /** Orquestrador ao qual este agente responde (hierarquia). */
+  parentAgentId: z.string().min(1).max(80).optional(),
+  responsibilities: z.string().trim().max(2000).optional(),
+  /** Onde o agente PODE escrever. Ausente: sem restrição. Lista vazia: somente leitura. */
+  writeScopes: z.array(writeScopeSchema).max(30).optional(),
+  /** Domínios dos quais este agente depende (por exemplo o front-end depende do back-end). */
+  dependsOnDomains: z.array(domainSchema).max(10).default([]),
 });
 
+/** Edição parcial: só o que for enviado muda (sem valores padrão que sobrescrevam). */
+export const agentPatchSchema = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  role: z.string().trim().min(1).max(120).optional(),
+  instructions: z.string().trim().min(1).max(8000).optional(),
+  providerKind: z.enum(PROVIDER_KINDS).optional(),
+  model: z.string().trim().min(1).max(80).optional(),
+  fallbackModels: z.array(z.string().trim().min(1).max(80)).max(5).optional(),
+  budgetUsd: z.number().positive().max(10_000).optional(),
+  kind: z.enum(AGENT_KINDS).optional(),
+  domain: domainSchema.nullable().optional(),
+  parentAgentId: z.string().min(1).max(80).nullable().optional(),
+  responsibilities: z.string().trim().max(2000).nullable().optional(),
+  writeScopes: z.array(writeScopeSchema).max(30).nullable().optional(),
+  dependsOnDomains: z.array(domainSchema).max(10).optional(),
+});
+
+export const MAX_PROJECT_CONTEXT = 100_000;
 export const projectSchema = z.object({
   name: z.string().trim().min(1).max(80),
   workspacePath: z.string().trim().min(1).max(500),
+  /** PRD e demais dados do projeto (Markdown). O orquestrador recebe inteiro; os especialistas, um trecho. */
+  context: z.string().max(MAX_PROJECT_CONTEXT).optional(),
+});
+export const projectPatchSchema = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  workspacePath: z.string().trim().min(1).max(500).optional(),
+  context: z.string().max(MAX_PROJECT_CONTEXT).optional(),
 });
 
 export const planTaskSchema = z.object({
@@ -235,6 +286,8 @@ export const subtasksRequestSchema = z.object({
         title: z.string().trim().min(1).max(200),
         /** Padrão: o mesmo agente da tarefa que criou a subtarefa. */
         agentId: z.string().min(1).optional(),
+        /** Alternativa ao agentId: o domínio ou o nome de um agente da equipe (o orquestrador delega assim). */
+        agent: z.string().trim().min(1).max(80).optional(),
         /** Só ids de subtarefas deste mesmo pedido. A dependência da tarefa criadora é automática. */
         dependsOn: z.array(z.string()).max(MAX_SUBTASKS_PER_CALL).default([]),
         risk: z.enum(RISK_LEVELS).default('low'),

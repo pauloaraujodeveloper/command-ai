@@ -472,13 +472,16 @@ export class Orchestrator {
   }
 
   /** As outras tarefas do plano (para o agente saber a quem escrever). */
-  peersOf(taskId: string): Array<{ taskId: string; title: string; status: string }> {
+  peersOf(taskId: string): Array<{ taskId: string; title: string; status: string; agent?: string; domain?: string }> {
     const task = this.mustTask(taskId);
     return this.store.tasks
       .filter((t) => t.executionId === task.executionId && t.id !== task.id)
       .sort((a, b) => a.position - b.position)
       .slice(0, 30)
-      .map((t) => ({ taskId: t.planId, title: t.title, status: t.status }));
+      .map((t) => {
+        const a = this.store.agents.get(t.agentId);
+        return { taskId: t.planId, title: t.title, status: t.status, ...(a ? { agent: a.name } : {}), ...(a?.domain ? { domain: a.domain } : {}) };
+      });
   }
 
   /** Todas as mensagens da execução, para a pessoa acompanhar. */

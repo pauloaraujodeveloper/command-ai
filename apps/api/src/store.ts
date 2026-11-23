@@ -107,12 +107,22 @@ export interface Agent {
   model: string;
   fallbackModels?: string[];
   budgetUsd: number;
+  /** Orquestrador planeja e delega; especialista executa. Ausente (agentes antigos) = especialista. */
+  kind?: 'orchestrator' | 'specialist';
+  domain?: string;
+  parentAgentId?: string;
+  responsibilities?: string;
+  /** Onde pode escrever. Ausente: sem restrição. Vazia: somente leitura. */
+  writeScopes?: string[];
+  dependsOnDomains?: string[];
 }
 export interface Project {
   id: string;
   organizationId: string;
   name: string;
   workspacePath: string;
+  /** PRD e dados do projeto (Markdown). */
+  context?: string;
 }
 export interface Execution {
   id: string;
