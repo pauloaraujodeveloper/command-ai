@@ -100,7 +100,9 @@ if (production && registrationAllowedEmails.length === 0) console.warn('[aviso] 
 const built = await buildApp({ attemptLimiter, jobSigningKey, production, repo, neonAuth, webDist, neonAuthBaseUrl: process.env.NEON_AUTH_BASE_URL, requireMfa, registrationAllowedEmails, orchestrator: orchestratorOptionsFromEnv() });
 const { app } = built;
 const port = Number(process.env.PORT ?? 3011);
-const host = process.env.HOST ?? '127.0.0.1';
+// Em produção (hospedagem como o Render) a plataforma só alcança portas em 0.0.0.0; em desenvolvimento fica só na máquina.
+// HOST sempre vence, se definido.
+const host = process.env.HOST ?? (production ? '0.0.0.0' : '127.0.0.1');
 
 /* ---- Recuperação dentro da própria API: só em memória (desenvolvimento) ou com SWEEP_IN_PROCESS=true ----
    Com PostgreSQL e Worker separado (`pnpm worker`), deixe desligado: o Worker cuida disso. */
