@@ -1,6 +1,19 @@
 import { isAbsolute, relative, resolve } from 'node:path';
 import { verifyJob, type SignedJob } from '@command-ai/shared/signing';
 
+/** Papel do agente na equipe (vem do servidor, dentro do trabalho assinado). */
+export interface AgentProfile {
+  id: string;
+  name: string;
+  kind: 'orchestrator' | 'specialist';
+  domain?: string;
+  responsibilities?: string;
+  /** Onde pode escrever. Ausente: sem restrição. Vazia: somente leitura. */
+  writeScopes?: string[];
+  dependsOnDomains: string[];
+  parent?: { id: string; name: string; domain?: string };
+}
+
 export interface JobPayload {
   taskId: string;
   executionId: string;
@@ -18,8 +31,13 @@ export interface JobPayload {
   upstream?: Array<{ taskId: string; title: string; output: string; commit?: string }>;
   /** Mensagens de outros agentes endereçadas a esta tarefa (dado não confiável). */
   inbox?: Array<{ id?: string; from: string; fromTitle: string; content: string; at: string }>;
-  /** As outras tarefas do plano (id, título, situação), para saber a quem escrever. */
-  peers?: Array<{ taskId: string; title: string; status: string }>;
+  /** As outras tarefas do plano (id, título, situação, agente), para saber a quem escrever. */
+  peers?: Array<{ taskId: string; title: string; status: string; agent?: string; domain?: string }>;
+  /** Quem este agente é na equipe, a equipe (subordinados do orquestrador, ou colegas do especialista) e o PRD do projeto. */
+  agent?: AgentProfile;
+  team?: AgentProfile[];
+  projectContext?: string;
+  projectContextTruncated?: boolean;
 }
 
 export interface ExecutorResult {

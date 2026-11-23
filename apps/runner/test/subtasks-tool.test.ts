@@ -28,7 +28,7 @@ describe('ferramenta plan_subtasks: especificação', () => {
     expect(tasks.type).toBe('array');
     const items = tasks.items as ObjectSchema;
     expect(items.additionalProperties).toBe(false);
-    expect(Object.keys(items.properties).sort()).toEqual(['dependsOn', 'id', 'risk', 'title']);
+    expect(Object.keys(items.properties).sort()).toEqual(['agent', 'dependsOn', 'id', 'risk', 'title']);
     expect(items.properties.risk!.enum).toEqual(['low', 'medium', 'high']);
   });
   it('também em workspace somente leitura (planejar não escreve arquivos)', () => {

@@ -2,6 +2,7 @@ import { lstat, mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:f
 import { dirname, join, relative } from 'node:path';
 import type { Sandbox } from './sandbox.ts';
 import type { JsonSchemaProp, ObjectSchema, ToolSpec } from './types.ts';
+import { matchesScope } from './scope.ts';
 import { PathGuardError, isProtectedPath, resolveInside } from './workspace.ts';
 
 export type WorkspaceKind = 'worktree' | 'readonly' | 'direct';
@@ -17,6 +18,8 @@ export interface ToolContext {
   /** Sem sandbox, `run_command` fica desativada: o agente NUNCA executa comandos no host. */
   sandbox?: Sandbox;
   commandTimeoutMs?: number;
+  /** Onde este agente pode escrever (ausente: sem restrição; vazia: somente leitura). */
+  writeScopes?: string[];
   /** Cria subtarefas no plano (servidor). Sem isso, `plan_subtasks` não existe. */
   planSubtasks?: (tasks: SubtaskInput[]) => Promise<{ added: string[] }>;
   /** Conversa entre agentes da mesma execução. Sem isso, `send_message` e `read_messages` não existem. */
@@ -51,6 +54,8 @@ export function renderMessages(messages: InboxMessage[]): string {
 export interface SubtaskInput {
   id: string;
   title: string;
+  /** Domínio ou nome de um agente da equipe; ausente: o mesmo agente. */
+  agent?: string;
   dependsOn: string[];
   risk?: 'low' | 'medium' | 'high';
 }
@@ -70,6 +75,13 @@ interface ToolDef {
 const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_OUTPUT_CHARS = 30_000;
 const IGNORED_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', '.next', '.venv', '__pycache__', '.turbo', 'coverage']);
+
+/** Recusa a escrita fora do escopo do agente. Devolve a mensagem de erro, ou null se pode. */
+function scopeDenied(ctx: ToolContext, rel: string): ToolResult | null {
+  if (ctx.writeScopes === undefined || matchesScope(rel, ctx.writeScopes)) return null;
+  if (ctx.writeScopes.length === 0) return { content: 'Erro: este agente é somente leitura e não pode alterar arquivos.', isError: true };
+  return { content: `Erro: caminho fora do escopo de escrita deste agente (pode escrever em: ${ctx.writeScopes.join(', ')}). Peça a quem cuida dessa área por send_message, ou registre a dependência no resultado.`, isError: true };
+}
 
 const ok = (content: string): ToolResult => ({ content });
 const fail = (content: string): ToolResult => ({ content, isError: true });
@@ -280,6 +292,8 @@ export const TOOLS: Record<string, ToolDef> = {
         const content = String(input.content);
         if (Buffer.byteLength(content) > MAX_FILE_BYTES) return fail('Erro: conteúdo grande demais (limite de 1 MB)');
         const file = await resolveInside(ctx.workspace.root, String(input.path));
+        const denied = scopeDenied(ctx, posix(relative(ctx.workspace.root, file)));
+        if (denied) return denied;
         await mkdir(dirname(file), { recursive: true });
         // Depois de criar as pastas, confere de novo: a criação não pode ter atravessado um link.
         await resolveInside(ctx.workspace.root, String(input.path));
@@ -305,6 +319,8 @@ export const TOOLS: Record<string, ToolDef> = {
       if (ctx.workspace.kind === 'readonly') return fail('Erro: o workspace é somente leitura (não é um repositório Git com commit)');
       return (await guarded(async () => {
         const file = await resolveInside(ctx.workspace.root, String(input.path));
+        const denied = scopeDenied(ctx, posix(relative(ctx.workspace.root, file)));
+        if (denied) return denied;
         const info = await stat(file);
         if (info.size > MAX_FILE_BYTES) return fail('Erro: arquivo grande demais (limite de 1 MB)');
         const text = await readFile(file, 'utf8');
@@ -326,6 +342,8 @@ export const TOOLS: Record<string, ToolDef> = {
       if (ctx.workspace.kind === 'readonly') return fail('Erro: o workspace é somente leitura (não é um repositório Git com commit)');
       return (await guarded(async () => {
         const file = await resolveInside(ctx.workspace.root, String(input.path));
+        const denied = scopeDenied(ctx, posix(relative(ctx.workspace.root, file)));
+        if (denied) return denied;
         const info = await lstat(file);
         if (info.isDirectory()) return fail('Erro: é uma pasta; só arquivos podem ser apagados');
         await unlink(file);
@@ -391,6 +409,7 @@ export const TOOLS: Record<string, ToolDef> = {
             properties: {
               id: { type: 'string', description: 'Identificador curto: letras, números, _ e - (até 40).', maxLength: 40 },
               title: { type: 'string', description: 'Objetivo completo da subtarefa, com o critério de pronto.', maxLength: 200 },
+              agent: { type: 'string', description: 'Domínio ou nome do agente da equipe que fará esta subtarefa (por exemplo frontend, backend, database, infra). Ausente: o mesmo agente desta tarefa.', maxLength: 80 },
               dependsOn: { type: 'array', description: 'Ids de outras subtarefas desta chamada que precisam terminar antes.', maxItems: 5, items: { type: 'string', maxLength: 40 } },
               risk: { type: 'string', description: 'Risco da subtarefa. Nunca fica abaixo do risco desta tarefa.', enum: ['low', 'medium', 'high'] },
             },
@@ -403,7 +422,7 @@ export const TOOLS: Record<string, ToolDef> = {
     ),
     async run(input, ctx) {
       if (!ctx.planSubtasks) return fail('Erro: criar subtarefas não está disponível neste ambiente');
-      const tasks = (input.tasks as Array<{ id: string; title: string; dependsOn?: string[]; risk?: SubtaskInput['risk'] }>).map((t) => ({ dependsOn: [], ...t }));
+      const tasks = (input.tasks as Array<{ id: string; title: string; agent?: string; dependsOn?: string[]; risk?: SubtaskInput['risk'] }>).map((t) => ({ dependsOn: [], ...t }));
       try {
         const r = await ctx.planSubtasks(tasks);
         return ok(`Subtarefas criadas: ${r.added.join(', ')}. Elas rodam depois que esta tarefa terminar; conclua o seu trabalho e descreva no resultado o que ficou para elas.`);

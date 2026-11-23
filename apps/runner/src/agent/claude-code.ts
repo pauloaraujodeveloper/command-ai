@@ -96,7 +96,7 @@ export function claudeCodeExecutor(o: ClaudeCodeOptions): Executor {
 
     let tools: Awaited<ReturnType<typeof openToolServer>> | undefined;
     try {
-      tools = await openToolServer({ job, ctx, ws, emit, signal, dataDir: o.dataDir, sandbox: o.sandbox, commandTimeoutMs: o.commandTimeoutMs, approvalPollMs: o.approvalPollMs, approvalTimeoutMs: o.approvalTimeoutMs, writeConfigFile: true });
+      tools = await openToolServer({ job, ctx, ws, emit, signal, dataDir: o.dataDir, sandbox: o.sandbox, commandTimeoutMs: o.commandTimeoutMs, approvalPollMs: o.approvalPollMs, approvalTimeoutMs: o.approvalTimeoutMs, writeScopes: job.agent?.writeScopes, writeConfigFile: true });
       const hasTools = tools.exposed.length > 0;
       // Uma chamada pode esperar a decisão humana por minutos: o CLI não pode desistir antes do prazo de aprovação.
       const extra = hasTools ? { ...(o.extraEnv ?? {}), MCP_TOOL_TIMEOUT: String((o.approvalTimeoutMs ?? 15 * 60_000) + 120_000) } : (o.extraEnv ?? {});
@@ -180,7 +180,7 @@ export function claudeCodeExecutor(o: ClaudeCodeOptions): Executor {
       if (final.is_error) throw new Error(redactSecrets(String(final.result ?? 'erro desconhecido do Claude Code')).slice(0, 500));
 
       if (typeof final.total_cost_usd === 'number') emit(`Custo equivalente de API (só referência; a assinatura não cobra por token): US$ ${final.total_cost_usd.toFixed(4)}`);
-      const fin = await ws.finalize();
+      const fin = await ws.finalize({ writeScopes: job.agent?.writeScopes });
       const output = composeOutput(ws, fin, String(final.result ?? ''));
       emit(`Concluído em ${final.num_turns ?? '?'} turno(s) do Claude Code`);
       return { output, workspaceCommit: fin.commit, usage: unreported ?? { model: 'assinatura', inputTokens: 0, outputTokens: 0 } };

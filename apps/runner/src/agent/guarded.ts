@@ -20,6 +20,8 @@ export interface GuardEnv {
   emit: (line: string) => void;
   signal: AbortSignal;
   commandTimeoutMs?: number;
+  /** Onde este agente pode escrever (ausente: sem restrição). */
+  writeScopes?: string[];
   approvalPollMs?: number;
   approvalTimeoutMs?: number;
   /** Ferramentas oferecidas neste ambiente (as demais são recusadas, mesmo que o modelo as peça). */
@@ -70,6 +72,7 @@ export async function runGuarded(name: string, input: unknown, env: GuardEnv): P
     signal: env.signal,
     sandbox: env.sandbox,
     commandTimeoutMs: env.commandTimeoutMs,
+    writeScopes: env.writeScopes,
     planSubtasks: env.planning ? (tasks) => c.addSubtasks!(env.taskId, { attempt: env.attempt, tasks }) : undefined,
     sendMessage: env.messaging ? async (to, content) => void (await c.sendMessage!(env.taskId, { attempt: env.attempt, to, content })) : undefined,
     readMessages: env.messaging ? async () => (await c.readMessages!(env.taskId, { attempt: env.attempt })).messages : undefined,

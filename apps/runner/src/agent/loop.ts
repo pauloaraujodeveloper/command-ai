@@ -39,6 +39,8 @@ export interface AgentDeps {
   signal: AbortSignal;
   limits: AgentLimits;
   commandTimeoutMs?: number;
+  /** Onde este agente pode escrever (ausente: sem restrição; vazia: somente leitura). */
+  writeScopes?: string[];
 }
 
 export interface AgentResult {
@@ -135,6 +137,7 @@ export async function runAgent(deps: AgentDeps): Promise<AgentResult> {
     emit: deps.emit,
     signal: ctl.signal,
     commandTimeoutMs: deps.commandTimeoutMs,
+    writeScopes: deps.writeScopes,
     approvalPollMs: limits.approvalPollMs,
     approvalTimeoutMs: limits.approvalTimeoutMs,
     offered,

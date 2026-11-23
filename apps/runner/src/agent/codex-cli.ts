@@ -116,7 +116,7 @@ export function codexExecutor(o: CodexOptions): Executor {
 
     let tools: Awaited<ReturnType<typeof openToolServer>> | undefined;
     try {
-      tools = await openToolServer({ job, ctx, ws, emit, signal, dataDir: o.dataDir, sandbox: o.sandbox, commandTimeoutMs: o.commandTimeoutMs, approvalPollMs: o.approvalPollMs, approvalTimeoutMs: o.approvalTimeoutMs });
+      tools = await openToolServer({ job, ctx, ws, emit, signal, dataDir: o.dataDir, sandbox: o.sandbox, commandTimeoutMs: o.commandTimeoutMs, approvalPollMs: o.approvalPollMs, approvalTimeoutMs: o.approvalTimeoutMs, writeScopes: job.agent?.writeScopes });
       const hasTools = tools.exposed.length > 0 && !!tools.mcp;
       const approvalMs = o.approvalTimeoutMs ?? 15 * 60_000;
       const extra: Record<string, string> = { ...(o.extraEnv ?? {}), ...(hasTools ? { [MCP_TOKEN_ENV]: tools.token! } : {}) };
@@ -218,7 +218,7 @@ export function codexExecutor(o: CodexOptions): Executor {
         }
       }
 
-      const fin = await ws.finalize();
+      const fin = await ws.finalize({ writeScopes: job.agent?.writeScopes });
       const output = composeOutput(ws, fin, lastMessage);
       emit('Concluído pelo Codex');
       return { output, workspaceCommit: fin.commit, usage: unreported ?? { model: 'assinatura', inputTokens: 0, outputTokens: 0 } };

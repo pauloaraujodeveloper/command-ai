@@ -2,12 +2,29 @@ import { execFile } from 'node:child_process';
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { checkScope } from './scope.ts';
 import type { WorkspaceKind } from './tools.ts';
+
+/** O agente alterou arquivos fora do escopo permitido: o resultado não é registrado. */
+export class ScopeError extends Error {
+  constructor(
+    public readonly files: string[],
+    scopes: string[],
+  ) {
+    super(
+      scopes.length === 0
+        ? `O agente é somente leitura, mas alterou arquivos: ${files.slice(0, 10).join(', ')}. O resultado não foi registrado.`
+        : `O agente alterou arquivos fora do escopo de escrita permitido (${scopes.join(', ')}): ${files.slice(0, 10).join(', ')}${files.length > 10 ? ` e mais ${files.length - 10}` : ''}. O resultado não foi registrado.`,
+    );
+  }
+}
 
 const execFileAsync = promisify(execFile);
 
 export interface FinalizeResult {
   changedFiles: number;
+  /** Caminhos alterados (relativos ao repositório). */
+  files: string[];
   stat: string;
   /** Patch (truncado para caber no relatório). O completo vai para `patchFile`. */
   patch: string;
@@ -26,7 +43,7 @@ export interface TaskWorkspace {
   /** Aviso quando algum commit de tarefa anterior não pôde ser usado como base. */
   baseNote?: string;
   /** Resume o que o agente mudou (e guarda o patch em arquivo). */
-  finalize(): Promise<FinalizeResult>;
+  finalize(opts?: { writeScopes?: string[] }): Promise<FinalizeResult>;
   /** Remove o worktree se não houve mudanças; com mudanças ele fica para revisão. */
   cleanup(): Promise<void>;
 }
@@ -77,7 +94,7 @@ export async function createTaskWorkspace(opts: Options): Promise<TaskWorkspace>
   const readOnlyOrDirect = (): TaskWorkspace => ({
     root: opts.workspacePath,
     kind: opts.allowDirectWrites ? 'direct' : 'readonly',
-    finalize: async () => ({ changedFiles: 0, stat: '', patch: '', patchFile: null }),
+    finalize: async () => ({ changedFiles: 0, files: [], stat: '', patch: '', patchFile: null }),
     cleanup: async () => undefined,
   });
 
@@ -143,16 +160,19 @@ export async function createTaskWorkspace(opts: Options): Promise<TaskWorkspace>
     root,
     kind: 'worktree',
     baseNote,
-    async finalize() {
+    async finalize(fopts) {
       await runGit(wtPath, hooksDir, ['add', '-A']);
       const names = (await runGit(wtPath, hooksDir, ['diff', '--cached', '--name-only'])).split('\n').filter(Boolean);
       const ref = `refs/command-ai/${name}`;
       if (names.length === 0) {
         const same = (await runGit(wtPath, hooksDir, ['rev-parse', 'HEAD'])).trim();
         await runGit(toplevel, hooksDir, ['update-ref', ref, same]);
-        last = { changedFiles: 0, stat: '', patch: '', patchFile: null, commit: same };
+        last = { changedFiles: 0, files: [], stat: '', patch: '', patchFile: null, commit: same };
         return last;
       }
+      // Escopo de escrita do agente: o resultado de quem escreveu fora dele nunca vira commit nem referência.
+      const outside = checkScope(names, fopts?.writeScopes);
+      if (outside.length > 0) throw new ScopeError(outside, fopts?.writeScopes ?? []);
       const stat = (await runGit(wtPath, hooksDir, ['diff', '--cached', '--stat', '--no-color'])).trim();
       const full = await runGit(wtPath, hooksDir, ['diff', '--cached', '--patch', '--no-color']);
       await mkdir(join(opts.dataDir, 'patches'), { recursive: true });
@@ -164,6 +184,7 @@ export async function createTaskWorkspace(opts: Options): Promise<TaskWorkspace>
       last = {
         commit,
         changedFiles: names.length,
+        files: names,
         stat,
         patch: full.length > MAX_PATCH_IN_REPORT ? `${full.slice(0, MAX_PATCH_IN_REPORT)}\n[patch cortado: veja o arquivo completo]\n` : full,
         patchFile,

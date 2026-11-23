@@ -2,6 +2,7 @@ import type { Executor, JobPayload } from '../runner.ts';
 import { buildSystemPrompt, runAgent, type AgentLimits } from './loop.ts';
 import type { Sandbox } from './sandbox.ts';
 import type { ModelClient } from './types.ts';
+import { buildRolePrompt } from './role.ts';
 import { renderMessages } from './tools.ts';
 import { createTaskWorkspace } from './worktree.ts';
 
@@ -21,7 +22,7 @@ const MAX_PATCH_IN_OUTPUT = 20_000;
 /** Tarefa + resultado das anteriores. O que veio de outros agentes entra delimitado e rotulado como dado não confiável. */
 export function buildPrompt(job: JobPayload, opts: { messaging?: boolean } = {}): string {
   const messaging = opts.messaging ?? true;
-  const parts = [buildUpstreamPrompt(job)];
+  const parts = [buildRolePrompt(job, { messaging }), buildUpstreamPrompt(job)].filter(Boolean);
   const peers = job.peers ?? [];
   if (peers.length > 0) {
     const list = peers.map((p) => `- ${p.taskId.replace(/[^\w-]/g, '_')}: ${p.title.replace(/[\r\n<>]/g, ' ').slice(0, 120)} (${p.status})`);
@@ -118,9 +119,10 @@ export function agentExecutor(o: AgentExecutorOptions): Executor {
         signal,
         limits: o.limits,
         commandTimeoutMs: o.commandTimeoutMs,
+        writeScopes: job.agent?.writeScopes,
       });
 
-      const fin = await ws.finalize();
+      const fin = await ws.finalize({ writeScopes: job.agent?.writeScopes });
       const output = composeOutput(ws, fin, result.output);
       emit(`Concluído em ${result.turns} interação(ões) com o modelo`);
       return {

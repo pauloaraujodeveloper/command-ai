@@ -141,6 +141,8 @@ export interface ToolServerOptions {
   dataDir: string;
   sandbox?: Sandbox;
   commandTimeoutMs?: number;
+  /** Onde este agente pode escrever (ausente: sem restrição). Vale para as ferramentas do Runner (apagar arquivo etc.). */
+  writeScopes?: string[];
   approvalPollMs?: number;
   approvalTimeoutMs?: number;
   /** Escreve um arquivo de configuração (0600) com a URL e o token, para CLIs que o recebem por arquivo (Claude Code). */
@@ -178,6 +180,7 @@ export async function openToolServer(o: ToolServerOptions): Promise<ToolServer> 
     emit: o.emit,
     signal: o.signal,
     commandTimeoutMs: o.commandTimeoutMs,
+    writeScopes: o.writeScopes,
     approvalPollMs: o.approvalPollMs,
     approvalTimeoutMs: o.approvalTimeoutMs,
     offered: new Set(exposed.map((t) => t.name)),
