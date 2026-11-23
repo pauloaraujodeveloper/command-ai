@@ -5,6 +5,8 @@ Implementação do [PRD v2.0](docs/PRD-status.md) (MVP vertical, etapas 1 a 3 em
 
 Três formas de usar: **web**, **app instalável (PWA)** e **desktop (Electron)**. As três usam a mesma interface e o mesmo servidor.
 
+**Manual de uso (passo a passo, em linguagem simples):** [docs/MANUAL.md](docs/MANUAL.md). Versão ilustrada com imagens das telas: [docs/Manual-Command-AI.pdf](docs/Manual-Command-AI.pdf).
+
 ## Estrutura
 
 | Pasta | O que é |
