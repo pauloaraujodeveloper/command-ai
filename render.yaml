@@ -1,0 +1,34 @@
+# Blueprint do Render: um Web Service que roda a API e serve o painel web na mesma origem.
+# O banco é o Neon (não crie Postgres no Render). Os segredos (sync: false) são preenchidos no painel do Render.
+# NÃO TESTADO em um deploy real: a primeira subida pode precisar de ajustes. Veja docs/RUNBOOK.md ("Implantação no Render").
+services:
+  - type: web
+    name: command-ai
+    runtime: node
+    plan: starter # o plano free hiberna e derruba as conexões ao vivo (SSE); use um plano pago
+    region: oregon
+    buildCommand: pnpm install --frozen-lockfile --prod=false && pnpm --filter @command-ai/web build
+    startCommand: pnpm --filter @command-ai/api run start
+    healthCheckPath: /api/v1/health
+    autoDeploy: false
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      # A recuperação de tarefas roda dentro da API (uma única instância). Com várias instâncias, use o Worker e o Redis.
+      - key: SWEEP_IN_PROCESS
+        value: "true"
+      # Segredos: cole no painel do Render.
+      - key: JOB_SIGNING_KEY # novo, aleatório, mínimo de 32 caracteres (não reutilize a chave de desenvolvimento)
+        sync: false
+      - key: DATABASE_URL_APP # papel restrito (RLS), gravado em .env.db-app por `db:create-app-role`
+        sync: false
+      - key: DATABASE_URL # conexão do dono, usada só para o que a API precisar fora do RLS
+        sync: false
+      - key: NEON_AUTH_BASE_URL
+        sync: false
+      - key: NEON_AUTH_JWKS_URL
+        sync: false

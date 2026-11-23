@@ -145,3 +145,15 @@ O instalador `.exe` (`pnpm --filter @command-ai/desktop dist:win:installer`) **f
 2. Gere o instalador em CI (por exemplo, runner `windows-latest` do GitHub Actions), onde essa política não existe.
 
 Em qualquer caso, teste instalação, atualização e desinstalação em uma máquina limpa. Isso ainda **não foi feito**. Se um `.exe` de poucas centenas de KB aparecer em `dist/`, é resíduo de uma compilação que falhou: apague a pasta `dist/`.
+
+## Implantação no Render
+
+**Não testado em um deploy real.** O `render.yaml` na raiz descreve um Web Service que roda a API e serve o painel web na mesma origem. O banco é o Neon (não crie Postgres no Render).
+
+1. No Render: **New > Blueprint**, aponte para o repositório e confirme o `render.yaml`.
+2. Preencha os segredos pedidos (`sync: false`): `JOB_SIGNING_KEY` (novo, aleatório, 32+ caracteres), `DATABASE_URL_APP` (papel restrito, de `.env.db-app`), `DATABASE_URL`, `NEON_AUTH_BASE_URL` e `NEON_AUTH_JWKS_URL` (de `.env.local`). Nunca versione esses valores.
+3. O schema do Neon já precisa estar aplicado (`pnpm db:migrate` e `db:create-app-role`, ver "Banco (Neon)").
+4. Em produção o MFA é obrigatório por padrão: a primeira conta precisa ativá-lo no primeiro acesso.
+5. A recuperação de tarefas roda dentro da API (`SWEEP_IN_PROCESS=true`) e vale para **uma** instância. Com mais de uma, suba o Worker (`pnpm worker`) e um Redis.
+6. O plano free hiberna e derruba as conexões ao vivo (SSE); use um plano pago.
+7. O Runner continua na sua máquina e aponta `COMMAND_AI_API_URL` para a URL pública do serviço.
