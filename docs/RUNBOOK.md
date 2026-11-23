@@ -79,6 +79,14 @@ $env:RUNNER_EXECUTOR = 'agent'; $env:ANTHROPIC_API_KEY = '...'; pnpm runner
 - **Mensagens entre agentes:** cada mensagem aparece na linha do tempo ("Mensagem de X para Y") e o texto completo está em `GET /api/v1/executions/<id>/messages`. Limites: 2000 caracteres e 20 mensagens por tarefa; não se envia para tarefa já encerrada.
 - **Referências do encadeamento:** cada tarefa concluída deixa `refs/command-ai/<tarefa>-a<tentativa>` no seu repositório (o branch não muda). Para ver: `git for-each-ref refs/command-ai`. Para apagar todas: `git for-each-ref --format='%(refname)' refs/command-ai | ForEach-Object { git update-ref -d $_ }` e depois `git gc`.
 - **Limpeza:** `docker ps -a --filter name=ca-sbx-` deve estar vazio fora de uma execução. Worktrees esquecidos: `git worktree list` no repositório e `git worktree prune`.
+- **Verificar com o modelo real** (gasta tokens, pouco: teto de 60 mil tokens e modelo mais barato por padrão; roda num repositório temporário, sem Docker e sem a API do Command AI). Confere autenticação, esquemas estritos de todas as ferramentas, `plan_subtasks` com lista de objetos e um laço de várias interações com raciocínio reenviado:
+
+```powershell
+$env:ANTHROPIC_API_KEY = "sk-ant-..."   # só nesta janela do PowerShell, nunca em arquivo
+cd apps/runner
+npx tsx scripts/live-model-check.ts       # LIVE_MODEL escolhe o modelo (padrão claude-haiku-5-5)
+```
+
 - **Verificar tudo de ponta a ponta sem chave de API** (usa o modelo de demonstração, o Docker local e uma API em memória):
 
 ```powershell
