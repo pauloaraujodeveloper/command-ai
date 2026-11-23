@@ -18,6 +18,7 @@ function run() {
   }
   out({ type: 'system', subtype: 'init', model: 'claude-fake', cwd: process.cwd(), tools: ['Read', 'Write', 'Edit'] });
 
+  if (mode === 'mcp') return void runMcp();
   if (mode === 'hang') return void setInterval(() => undefined, 1000);
   if (mode === 'crash') {
     process.stderr.write('falha interna com a chave sk-ant-abcdefghijklmnop1234567890 no ambiente\n');
@@ -51,4 +52,28 @@ function run() {
     total_cost_usd: 0.0123,
     usage: { input_tokens: 4, cache_creation_input_tokens: 2000, cache_read_input_tokens: 8000, output_tokens: 300 },
   });
+}
+
+// Imita o Claude Code usando as ferramentas do Runner por MCP (HTTP): lê --mcp-config, fala JSON-RPC e registra o que recebeu em FAKE_MCP_OUT.
+async function runMcp() {
+  const i = process.argv.indexOf('--mcp-config');
+  const cfg = JSON.parse(fs.readFileSync(process.argv[i + 1], 'utf8')).mcpServers.command_ai;
+  const rpc = async (id, method, params) => {
+    const r = await fetch(cfg.url, { method: 'POST', headers: { 'content-type': 'application/json', ...cfg.headers }, body: JSON.stringify({ jsonrpc: '2.0', id, method, params }) });
+    return r.status === 202 ? null : await r.json();
+  };
+  const log = { url: cfg.url, token: String(cfg.headers.Authorization).slice(7) };
+  log.init = (await rpc(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'fake', version: '1' } })).result;
+  log.list = (await rpc(2, 'tools/list')).result.tools.map((t) => t.name);
+  const tools = JSON.parse(process.env.FAKE_MCP_CALLS || '[]');
+  log.calls = [];
+  let n = 3;
+  for (const c of tools) {
+    out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'm' + n, name: 'mcp__command_ai__' + c.name, input: c.args }] } });
+    const r = await rpc(n++, 'tools/call', { name: c.name, arguments: c.args });
+    log.calls.push({ name: c.name, result: r.result ?? r.error });
+    out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'm' + (n - 1), content: JSON.stringify(r.result ?? r.error), is_error: !!(r.result && r.result.isError) }] } });
+  }
+  if (process.env.FAKE_MCP_OUT) fs.writeFileSync(process.env.FAKE_MCP_OUT, JSON.stringify(log));
+  out({ type: 'result', subtype: 'success', is_error: false, result: 'MCP usado.', num_turns: 2, total_cost_usd: 0, usage: { input_tokens: 1, output_tokens: 1 } });
 }

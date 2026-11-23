@@ -170,7 +170,14 @@ if (mode === 'agent' || mode === 'agent-demo') {
 }
 // Cada agente escolhe o provedor: assinatura local (Claude Code), simulado, ou API. No modo de demonstração tudo usa o modelo de demonstração.
 const baseExecutor = executor;
-const claudeExec = claudeCodeExecutor({ dataDir: process.env.RUNNER_DATA_DIR ?? join(homedir(), '.command-ai-runner'), timeoutMs: num('RUNNER_TASK_TIMEOUT_MS', 30 * 60_000) });
+const claudeExec = claudeCodeExecutor({
+  dataDir: process.env.RUNNER_DATA_DIR ?? join(homedir(), '.command-ai-runner'),
+  timeoutMs: num('RUNNER_TASK_TIMEOUT_MS', 30 * 60_000),
+  sandbox,
+  commandTimeoutMs: num('RUNNER_COMMAND_TIMEOUT_MS', 300_000),
+  approvalPollMs: num('RUNNER_APPROVAL_POLL_MS', 2000),
+  approvalTimeoutMs: num('RUNNER_APPROVAL_TIMEOUT_MS', 15 * 60_000),
+});
 executor = routeExecutor({ mode, base: baseExecutor, claude: claudeExec, simulated: simulatedExecutor });
 console.log(`Runner conectado a ${apiUrl}`);
 console.log(`Executor: ${mode === 'agent' ? 'agente (modelo escolhido pelo provedor de cada agente)' : mode === 'agent-demo' ? 'agente de demonstração (roteiro fixo, sem chave)' : 'simulado (defina a chave de um provedor, por exemplo ANTHROPIC_API_KEY, para o agente real)'}`);

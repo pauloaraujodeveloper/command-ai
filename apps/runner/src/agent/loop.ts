@@ -1,7 +1,7 @@
-import { redactSecrets } from '../runner.ts';
-import { awaitApproval, decide, type ApprovalClient } from './policy.ts';
+import { CancelledError, runGuarded, short, type GuardEnv } from './guarded.ts';
+import type { ApprovalClient } from './policy.ts';
 import type { Sandbox } from './sandbox.ts';
-import { runTool, TOOLS, toolSpecs, validateInput, type InboxMessage, type SubtaskInput, type WorkspaceInfo } from './tools.ts';
+import { toolSpecs, type InboxMessage, type SubtaskInput, type WorkspaceInfo } from './tools.ts';
 import type { AgentMessage, ModelClient, ToolCall, ToolResultMessage, TurnUsage } from './types.ts';
 
 export interface AgentLimits {
@@ -74,8 +74,6 @@ function addUsage(a: TurnUsage, b: TurnUsage): TurnUsage {
   return out;
 }
 
-const short = (v: unknown, n = 160) => redactSecrets(typeof v === 'string' ? v : JSON.stringify(v) ?? '').replace(/\s+/g, ' ').slice(0, n);
-
 /**
  * Laço do agente: o modelo pede ferramentas, o Runner as executa (com política e aprovação humana),
  * devolve os resultados e o modelo continua até concluir. Tudo que o modelo diz é tratado como não confiável.
@@ -128,46 +126,29 @@ export async function runAgent(deps: AgentDeps): Promise<AgentResult> {
     unreported = unreported ? addUsage(unreported, usage) : usage;
   }
 
+  const guard: GuardEnv = {
+    workspace: deps.workspace,
+    sandbox: deps.sandbox,
+    client,
+    taskId: deps.taskId,
+    attempt: deps.attempt,
+    emit: deps.emit,
+    signal: ctl.signal,
+    commandTimeoutMs: deps.commandTimeoutMs,
+    approvalPollMs: limits.approvalPollMs,
+    approvalTimeoutMs: limits.approvalTimeoutMs,
+    offered,
+    planning,
+    messaging,
+  };
+
   async function execute(c: ToolCall): Promise<ToolResultMessage> {
-    const fail = (content: string): ToolResultMessage => ({ toolCallId: c.id, content, isError: true });
-    if (!offered.has(c.name)) return fail(`Ferramenta não disponível neste ambiente: ${c.name}`);
-    const def = TOOLS[c.name]!;
-    const invalid = validateInput(def.spec, c.input);
-    if (invalid) return fail(`INVALID_INPUT: ${invalid}`);
-
-    const decision = decide(c.name, c.input, deps.workspace.kind);
-    if (decision.action === 'approve') {
-      deps.emit(`Aguardando aprovação humana: ${c.name} (${decision.summary.slice(0, 120)})`);
-      const outcome = await awaitApproval(
-        client,
-        deps.taskId,
-        { attempt: deps.attempt, tool: c.name, summary: decision.summary, risk: decision.risk, argsPreview: short(c.input, 4000) },
-        { signal: ctl.signal, pollMs: limits.approvalPollMs, timeoutMs: limits.approvalTimeoutMs },
-      );
-      if (outcome.status === 'cancelled') throw stopError(new Error('cancelado'));
-      if (outcome.status === 'rejected') {
-        deps.emit(`Aprovação negada para ${c.name}`);
-        return fail(`Negado pelo usuário${outcome.reason ? `: ${outcome.reason}` : ''}. A operação NÃO foi executada.`);
-      }
-      if (outcome.status !== 'approved') {
-        deps.emit(`Aprovação não concedida para ${c.name} (${outcome.status})`);
-        return fail(`Aprovação não concedida (${outcome.status}). A operação NÃO foi executada.`);
-      }
-      deps.emit(`Aprovado: ${c.name}`);
+    try {
+      return { toolCallId: c.id, ...(await runGuarded(c.name, c.input, guard)) };
+    } catch (e) {
+      if (e instanceof CancelledError) throw stopError(new Error('cancelado'));
+      throw e;
     }
-
-    deps.emit(`Ferramenta ${c.name} ${short(c.input, 120)}`);
-    const r = await runTool(c.name, c.input, {
-      workspace: deps.workspace,
-      signal: ctl.signal,
-      sandbox: deps.sandbox,
-      commandTimeoutMs: deps.commandTimeoutMs,
-      planSubtasks: planning ? (tasks) => client.addSubtasks!(deps.taskId, { attempt: deps.attempt, tasks }) : undefined,
-      sendMessage: messaging ? async (to, content) => void (await client.sendMessage!(deps.taskId, { attempt: deps.attempt, to, content })) : undefined,
-      readMessages: messaging ? async () => (await client.readMessages!(deps.taskId, { attempt: deps.attempt })).messages : undefined,
-    });
-    deps.emit(`Resultado ${c.name}: ${r.isError ? 'erro' : 'ok'} — ${short(r.content, 100)}`);
-    return { toolCallId: c.id, content: r.content, isError: !!r.isError };
   }
 
   try {

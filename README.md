@@ -22,7 +22,7 @@ Requisitos: Node 22+ e pnpm 10 (`npm i -g pnpm`).
 
 ```powershell
 pnpm install
-pnpm test          # 453 testes (os de Postgres, Redis e Docker rodam contra serviços reais e são ignorados sem eles)
+pnpm test          # 479 testes (os de Postgres, Redis e Docker rodam contra serviços reais e são ignorados sem eles)
 pnpm build
 ```
 
@@ -77,7 +77,7 @@ Feito e testado:
 - Organização em todo registro e isolamento entre organizações, com testes de acesso cruzado.
 - Plano editável com validação de ciclos, dependências, aprovação humana para risco alto, novas tentativas com espera progressiva e parada por orçamento.
 - **Confiabilidade (Fase 2):** API sem estado em memória, com várias instâncias sobre o mesmo PostgreSQL; reivindicação de tarefa atômica; lease com heartbeat e recuperação de tarefas de Runner que sumiu (Worker + BullMQ); prazo máximo de execução; relatórios idempotentes e com número da tentativa; cancelamento que chega ao Runner e o interrompe.
-- **Assinatura em vez de chave (Claude Code):** agentes do provedor `claude_code` usam o Claude Code já logado na sua máquina (plano mensal, sem chave de API), confinado ao worktree e só com ferramentas de arquivo. **Verificado com o CLI real** (`apps/runner/scripts/live-claude-check.ts`). O uso entra no painel com custo zero; a cota do plano é sua para vigiar (o log mostra a porcentagem usada).
+- **Assinatura em vez de chave (Claude Code):** agentes do provedor `claude_code` usam o Claude Code já logado na sua máquina (plano mensal, sem chave de API), confinado ao worktree. Arquivos pelas ferramentas do próprio CLI; **comandos (sandbox Docker), apagar arquivo, subtarefas e mensagens pelas ferramentas do Runner via um servidor MCP local**, com a mesma política e aprovação humana do agente por API. **Verificado com o CLI real** (`apps/runner/scripts/live-claude-check.ts` e `live-claude-mcp-check.ts`). O uso entra no painel com custo zero; a cota do plano é sua para vigiar (o log mostra a porcentagem usada).
 - **Vários provedores (Fase 5):** agentes da Anthropic, OpenAI, DeepSeek e Ollama (qualquer servidor compatível com Chat Completions) rodam no mesmo laço, com a mesma política, aprovação, sandbox e limites. A chave fica no ambiente do Runner; o servidor só diz o tipo do provedor.
 - **Comunicação entre agentes (Fase 4):** as tarefas de uma execução trocam mensagens (`send_message`, `read_messages`); o plano e a caixa de entrada vão junto com o trabalho; tudo fica registrado e visível (linha do tempo e histórico); o conteúdo chega como dado não confiável. Testada com tarefas em sequência com processos reais e com tarefas simultâneas na API.
 - **Subtarefas e replanejamento (Fase 4):** o agente pode propor subtarefas (`plan_subtasks`, com aprovação humana); elas entram no plano, herdam o resultado da tarefa criadora e as tarefas seguintes passam a esperar por elas. Limites: 5 por chamada, 25 tarefas e geração 2 por execução.
@@ -99,7 +99,6 @@ Ainda não feito (previsto no PRD):
 | Passkeys (WebAuthn), códigos de recuperação do MFA e login do Runner por código de dispositivo | Não implementados. O Runner usa token revogável |
 | Modelo de dados normalizado (Prisma) | Hoje os registros ficam em JSONB por tipo, sempre com `organization_id` |
 | Codex (assinatura ChatGPT) como executor | Não implementado: o CLI não está instalado e não escrevo contra flags que não consigo conferir. Mesmo contrato do Claude Code (ADR 0007) |
-| Claude Code por assinatura: comandos, subtarefas, mensagens e aprovação por chamada | Não disponíveis nesse executor (só arquivos); entrariam por um servidor MCP próprio do Runner |
 | Provedores OpenAI, DeepSeek e Ollama com modelos reais | Implementados e testados contra um servidor falso compatível (inclusive com processos reais), **nunca contra os serviços de verdade**. Sem preços na tabela para esses modelos: o orçamento em dinheiro não para a execução (valem os limites de turnos, tokens e tempo) |
 | Agente com o modelo real | Implementado e testado com respostas simuladas no formato da API; **a primeira execução com chave pode revelar ajustes** (esquemas estritos, autenticação do SDK, raciocínio entre turnos) |
 | Orquestração multiagente (Fase 4), partes restantes | Feito: tarefas encadeadas e subtarefas criadas pelo agente (com aprovação humana e limites). Falta: escolha de outro agente para a subtarefa pelo modelo (hoje o padrão é o mesmo agente), execução paralela comprovada com vários Runners (o commit só existe no Runner que rodou a tarefa) |
