@@ -1057,6 +1057,8 @@ export async function buildApp(opts: AppOptions) {
     const job = signJob(
       {
         taskId: task.id,
+        // Só o TIPO do provedor: chave, nome de variável e endereço vêm do ambiente do Runner, nunca do servidor.
+        provider: agent.providerKind,
         upstream,
         // Mensagens de outros agentes (dado não confiável) e o plano da execução, para saber a quem escrever.
         inbox: orchestrator.deliverInbox(task.id),

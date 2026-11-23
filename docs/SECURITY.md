@@ -44,8 +44,9 @@ Resumo do que está implementado e testado, e do que ainda falta. Nada aqui gara
 | `Idempotency-Key`: chave por usuário (um usuário não repete a resposta de outro), impressão digital de método, rota e corpo, só respostas de sucesso, expira e tem teto por organização; nunca em rotas que devolvem segredo (token de Runner) | `idempotency.test.ts`, `pg-api.test.ts` (duas instâncias, concorrência) |
 | Subtarefas criadas pelo agente: aprovação humana por chamada, até 5 por chamada, 25 tarefas e geração 2 por execução, risco herdado como mínimo, só o Runner dono da tarefa em execução (tentativa atual), agente da subtarefa tem de ser da mesma organização, ids validados e sem colisão com o plano, ciclos recusados; tudo ou nada (nenhuma subtarefa fica se o pedido é recusado) | `subtasks.test.ts`, `subtasks-tool.test.ts`, `e2e-agent.mjs` |
 | Mensagens entre agentes: só dentro da mesma execução e organização, só do Runner dono da tarefa em execução (tentativa atual) para tarefa ainda não encerrada, até 2000 caracteres e 20 por tarefa, registradas (evento `message.sent` e histórico completo para a pessoa) e entregues como dado não confiável (bloco delimitado que o texto não consegue fechar nem forjar) | `messages.test.ts`, `messages-tool.test.ts`, `e2e-agent.mjs` |
+| Vários provedores: o trabalho assinado leva só o TIPO do provedor; chave (variável fixa por tipo) e endereço vêm do ambiente do Runner, nunca do servidor; URL só http/https; erros do provedor sem corpo bruto e sem a chave; falha de rede sem detalhes | `provider-select.test.ts`, `openai-client.test.ts`, `providers-api.test.ts`, `e2e-agent.mjs` (servidor compatível falso) |
 | Chave do provedor só no ambiente do Runner; erros do provedor sem corpo bruto e sem a chave | `agent/anthropic-client.ts`, `anthropic-client.test.ts` |
-| Teste ponta a ponta com processos reais (API + Runner + Docker + aprovação pela API, aprovando e rejeitando) | `apps/runner/scripts/e2e-agent.mjs` (36 verificações) |
+| Teste ponta a ponta com processos reais (API + Runner + Docker + aprovação pela API, aprovando e rejeitando) | `apps/runner/scripts/e2e-agent.mjs` (43 verificações) |
 
 ### Modelo de ameaças do agente
 
@@ -62,6 +63,7 @@ Resumo do que está implementado e testado, e do que ainda falta. Nada aqui gara
 | Injeção de opção no `docker run` por caminho com vírgula ou quebra de linha | Caminho recusado antes de montar | — |
 | Injeção de prompt entre agentes (um agente induzido manda ordem a outro por `send_message`) | Mensagem é dado rotulado e delimitado; nenhuma ação perigosa passa sem aprovação humana por chamada, independentemente de quem sugeriu; tudo fica registrado | O modelo destinatário ainda pode ser influenciado pelo texto (a defesa é a aprovação, não o rótulo) |
 | Agente (induzido por injeção de prompt) criando trabalho em excesso para gastar o orçamento | Criar subtarefas pede aprovação humana, tem teto por chamada, por execução e por geração, e o orçamento da execução continua mandando parar | A pessoa pode aprovar sem ler; o teto de 25 tarefas limita o estrago, não o elimina |
+| Servidor comprometido mandando o Runner enviar uma variável de ambiente (por exemplo uma conexão de banco) como chave a um provedor | O servidor não escolhe nome de variável nem URL; só o tipo do provedor, e as variáveis são fixas no Runner | Um Runner com `OPENAI_BASE_URL` apontando para um servidor hostil envia a chave dele para lá (configuração é de quem opera o Runner) |
 | Aprovação antiga reaproveitada | Por chamada, ligada à tentativa; encerrada quando a tarefa sai de `running` | — |
 
 O que **não** foi feito: nenhum teste com o modelo real, nenhuma auditoria externa, nenhum teste de escape de contêiner além das propriedades verificadas em `sandbox.test.ts`.

@@ -91,7 +91,7 @@ export interface Session {
 export interface Provider {
   id: string;
   organizationId: string;
-  kind: 'anthropic' | 'openai' | 'ollama' | 'simulated';
+  kind: 'anthropic' | 'openai' | 'deepseek' | 'ollama' | 'simulated';
   name: string;
   apiKeyRef: string | null;
   defaultModel: string;

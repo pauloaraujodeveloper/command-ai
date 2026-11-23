@@ -23,6 +23,8 @@
 | `SWEEP_INTERVAL_MS` | Worker | Intervalo da varredura de recuperação (padrão 15000) |
 | `SWEEP_IN_PROCESS=true` | API | Roda a varredura dentro da API, para quem não tem Worker separado. Em memória já vem ligado |
 | `COMMAND_AI_RUNNER_TOKEN`, `RUNNER_ALLOWED_WORKSPACES`, `COMMAND_AI_API_URL`, `ANTHROPIC_API_KEY` | Runner | Sem a chave, usa o executor simulado |
+| `OPENAI_API_KEY`, `DEEPSEEK_API_KEY` | Runner | Chaves dos agentes dos provedores `openai` e `deepseek`. O nome da variável é fixo: o servidor não escolhe qual variável o Runner lê |
+| `OPENAI_BASE_URL`, `DEEPSEEK_BASE_URL`, `OLLAMA_BASE_URL` | Runner | Endereço da API (padrões `https://api.openai.com/v1`, `https://api.deepseek.com`, `http://127.0.0.1:11434/v1`). Só http ou https. Serve também para servidores compatíveis (vLLM, LM Studio…) |
 | `RUNNER_EXECUTOR` | Runner | `agent` (modelo real; padrão se houver chave), `agent-demo` (roteiro fixo, sem chave, para testar o fluxo) ou `simulated` (padrão sem chave) |
 | `RUNNER_SANDBOX_IMAGE` | Runner | Imagem Docker dos comandos do agente (padrão `node:22-alpine`). **Precisa existir localmente** (`docker pull`); o Runner não baixa nada |
 | `RUNNER_SANDBOX=off` | Runner | Desliga o sandbox: a ferramenta `run_command` some (comandos nunca rodam no host) |
@@ -75,6 +77,7 @@ $env:RUNNER_EXECUTOR = 'agent'; $env:ANTHROPIC_API_KEY = '...'; pnpm runner
 - **O que o agente faz:** lê e escreve num **worktree Git isolado** (fora do seu repositório) e entrega um **patch** no resultado e em `RUNNER_DATA_DIR/patches/`. Para aplicar depois de revisar: `git apply "<arquivo.patch>"`. Worktrees com mudanças ficam para revisão; sem mudanças, são removidos. Pasta sem Git (ou sem commit) é somente leitura.
 - **Aprovações de ferramenta** aparecem em *Aprovações* (e na fila de atenção) com a ferramenta, o resumo, o risco e os argumentos exatos. Aprovar vale só para aquela chamada. Sem decisão em `RUNNER_APPROVAL_TIMEOUT_MS`, a chamada é negada.
 - **Sem Docker ou sem a imagem:** o Runner avisa na partida (`Sandbox de comandos: INDISPONÍVEL…`) e a ferramenta `run_command` não é oferecida. Nada roda no host.
+- **Vários provedores:** cada agente tem um provedor (`anthropic`, `openai`, `deepseek`, `ollama`); o Runner usa o cliente certo e a chave do próprio ambiente. Na partida ele lista o que está configurado (sem mostrar chaves). **Custo:** só há preços na tabela para os modelos da Anthropic; com outros modelos a execução mostra custo desconhecido e **o orçamento em dinheiro não para a execução** (valem os limites de turnos, tokens e tempo). Dados lidos pelo agente vão ao provedor escolhido; com `ollama` local nada sai da máquina.
 - **Subtarefas:** quando o agente pede `plan_subtasks`, aparece uma aprovação com os títulos; ao aprovar, o plano cresce e o grafo mostra as tarefas novas. Limites: 5 por chamada, 25 tarefas e geração 2 por execução. Uma tarefa recusada pelo servidor (limite, id repetido) devolve o motivo ao agente.
 - **Mensagens entre agentes:** cada mensagem aparece na linha do tempo ("Mensagem de X para Y") e o texto completo está em `GET /api/v1/executions/<id>/messages`. Limites: 2000 caracteres e 20 mensagens por tarefa; não se envia para tarefa já encerrada.
 - **Referências do encadeamento:** cada tarefa concluída deixa `refs/command-ai/<tarefa>-a<tentativa>` no seu repositório (o branch não muda). Para ver: `git for-each-ref refs/command-ai`. Para apagar todas: `git for-each-ref --format='%(refname)' refs/command-ai | ForEach-Object { git update-ref -d $_ }` e depois `git gc`.
@@ -91,7 +94,7 @@ npx tsx scripts/live-model-check.ts       # LIVE_MODEL escolhe o modelo (padrão
 
 ```powershell
 cd apps/runner
-node scripts/e2e-agent.mjs                  # 36 verificações; E2E_SANDBOX_IMAGE escolhe a imagem local (padrão redis:7-alpine)
+node scripts/e2e-agent.mjs                  # 43 verificações; E2E_SANDBOX_IMAGE escolhe a imagem local (padrão redis:7-alpine)
 node scripts/demo-pending-approval.mjs      # sobe o painel em http://127.0.0.1:3097 com uma aprovação de ferramenta pendente
 ```
 

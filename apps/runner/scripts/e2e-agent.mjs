@@ -6,6 +6,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSyn
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { createServer } from 'node:http';
 
 const PORT = process.env.E2E_PORT ?? '3098';
 const IMAGE = process.env.E2E_SANDBOX_IMAGE ?? 'redis:7-alpine';
@@ -87,8 +88,8 @@ async function waitFor(fn, ms, what) {
   }
 }
 
-async function runExecution(label, toolDecision) {
-  const created = await api('POST', '/executions', { goal: `Documente o projeto (${label})`, projectId: projectId, agentId: agentId });
+async function runExecution(label, toolDecision, useAgent = agentId) {
+  const created = await api('POST', '/executions', { goal: `Documente o projeto (${label})`, projectId: projectId, agentId: useAgent });
   const exec = created.execution;
   await api('POST', `/executions/${exec.id}/start`, {});
   const decided = new Set();
@@ -230,10 +231,49 @@ try {
   check('D: as ferramentas de mensagem rodaram (enviar e ler)', /Resultado send_message: ok/.test(logsD) && /Resultado read_messages: ok/.test(logsD));
   check('D: o branch e a árvore da pessoa continuam intactos', git('rev-parse', 'HEAD').toString().trim() === headBefore && git('status', '--porcelain').toString().trim() === '');
 
+  /* ---- E: outro provedor (Fase 5): servidor falso compatível com a API da OpenAI, usado como "Ollama" ---- */
+  const llmRequests = [];
+  const llm = createServer((rq, rs) => {
+    let raw = '';
+    rq.on('data', (d) => (raw += d));
+    rq.on('end', () => {
+      const body = JSON.parse(raw);
+      llmRequests.push({ auth: rq.headers.authorization, body });
+      const done = body.messages.filter((m) => m.role === 'assistant').length;
+      const call = (id, name, args) => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } });
+      const steps = [
+        { content: 'Vou listar os arquivos.', tool_calls: [call('call_1', 'list_dir', { path: '.' })] },
+        { content: null, tool_calls: [call('call_2', 'write_file', { path: 'NOTAS-LLM.md', content: '# Escrito por um modelo de outro provedor\n' })] },
+        { content: 'Pronto: criei NOTAS-LLM.md.' },
+      ];
+      const msg = steps[Math.min(done, steps.length - 1)];
+      rs.setHeader('content-type', 'application/json');
+      rs.end(JSON.stringify({ id: 'x', choices: [{ index: 0, message: { role: 'assistant', content: null, ...msg }, finish_reason: msg.tool_calls ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 500 + done * 100, completion_tokens: 40 } }));
+    });
+  });
+  await new Promise((r) => llm.listen(0, '127.0.0.1', r));
+  const llmPort = llm.address().port;
+  stopOne(rp3);
+  start('runner4', 'npx', ['tsx', 'src/cli.ts'], join(root, 'apps/runner'), runnerEnv({ RUNNER_EXECUTOR: 'agent', OLLAMA_BASE_URL: `http://127.0.0.1:${llmPort}/v1` }));
+  const rp4 = procs.at(-1);
+  await waitFor(async () => rp4.logs.includes('Sandbox de comandos'), 30_000, 'Runner 4 subir');
+  check('E: o Runner informa os provedores configurados (sem mostrar chave)', /Provedor ollama/.test(rp4.logs) && /Provedor anthropic: não configurado/.test(rp4.logs));
+  const llmAgent = (await api('POST', '/agents', { name: 'Agente Ollama', role: 'Documentador', instructions: 'Documente.', providerKind: 'ollama', model: 'llama-falso', budgetUsd: 5 })).id;
+  const E = await runExecution('outro provedor', 'approved', llmAgent);
+  check('E: execução com agente de outro provedor concluída', E.exec.status === 'succeeded', E.exec.status);
+  check('E: o Runner falou com o servidor compatível (3 chamadas por tarefa) sem enviar Authorization', llmRequests.length === 3 * E.tasks && llmRequests.every((r) => r.auth === undefined), String(llmRequests.length));
+  check('E: o modelo recebeu as ferramentas no formato function e o nome do modelo do agente', llmRequests.every((r) => r.body.model === 'llama-falso' && r.body.tools.every((t) => t.type === 'function')) && llmRequests[0].body.tools.some((t) => t.function.name === 'write_file'));
+  const lastCall = llmRequests.at(-1).body.messages.filter((m) => m.role === 'tool');
+  check('E: os resultados das ferramentas voltaram ao modelo como mensagens role=tool', lastCall.length === 2 && lastCall[0].tool_call_id === 'call_1');
+  check('E: o uso foi contado por turno e o custo ficou "desconhecido" (modelo fora da tabela de preços)', (E.exec.inputTokens ?? 0) > 0 && E.exec.costUnknown === true, `${E.exec.inputTokens} in; costUnknown=${E.exec.costUnknown}`);
+  const eTask = E.taskList.find((t) => t.planId === 'analise');
+  check('E: o arquivo escrito pelo modelo de outro provedor chegou ao commit isolado, sem tocar na pasta da pessoa', /NOTAS-LLM\.md/.test(git('ls-tree', '-r', '--name-only', eTask.workspaceCommit).toString()) && git('status', '--porcelain').toString().trim() === '' && git('rev-parse', 'HEAD').toString().trim() === headBefore);
+  llm.close();
+
   /* ---- sandbox não deixa lixo ---- */
   const leftovers = execFileSync('docker', ['ps', '-a', '--filter', 'name=ca-sbx-', '--format', '{{.Names}}'], { stdio: 'pipe' }).toString().trim();
   check('Nenhum contêiner de sandbox sobrando', leftovers === '', leftovers);
-  check('Runners sem erros de comunicação', !/Erro de comunica/.test(rp.logs) && !/Erro de comunica/.test(rp2.logs) && !/Erro de comunica/.test(rp3.logs));
+  check('Runners sem erros de comunicação', !/Erro de comunica/.test(rp.logs) && !/Erro de comunica/.test(rp2.logs) && !/Erro de comunica/.test(rp3.logs) && !/Erro de comunica/.test(rp4.logs));
 } catch (err) {
   check(`erro inesperado: ${err instanceof Error ? err.message : err}`, false);
   for (const p of procs) console.log(`--- log ${p.name} (fim) ---\n${p.logs.slice(-1500)}`);

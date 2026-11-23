@@ -11,7 +11,7 @@ export interface ProviderCapabilities {
   usageMetrics: boolean;
 }
 
-export const CAPABILITIES: Record<'anthropic' | 'openai' | 'ollama' | 'simulated', ProviderCapabilities> = {
+export const CAPABILITIES: Record<'anthropic' | 'openai' | 'deepseek' | 'ollama' | 'simulated', ProviderCapabilities> = {
   anthropic: {
     streaming: true,
     toolCalling: true,
@@ -34,9 +34,21 @@ export const CAPABILITIES: Record<'anthropic' | 'openai' | 'ollama' | 'simulated
     cancellation: true,
     usageMetrics: true,
   },
+  deepseek: {
+    streaming: true,
+    toolCalling: true,
+    structuredOutput: true,
+    sessions: false,
+    codeExecution: false,
+    mcp: false,
+    subagents: false,
+    cancellation: true,
+    usageMetrics: true,
+  },
+  // Ollama chama ferramentas se o MODELO escolhido suportar (nem todos suportam); o Runner usa o mesmo laço do agente.
   ollama: {
     streaming: true,
-    toolCalling: false,
+    toolCalling: true,
     structuredOutput: false,
     sessions: false,
     codeExecution: false,

@@ -15,7 +15,9 @@ loadEnvFiles();
 const ownerUrl = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
 const appUrl = process.env.DATABASE_URL_APP;
 const schema = `ca_repo_${randomBytes(5).toString('hex')}`;
-const ORCH = { backoffBaseMs: 0, leaseMs: 400 };
+// Relógio controlado e igual nas duas instâncias: o lease vence quando o teste manda, não conforme a latência do banco.
+let clockSkewMs = 0;
+const ORCH = { backoffBaseMs: 0, leaseMs: 60_000, now: () => Date.now() + clockSkewMs };
 
 let owner: pg.Pool;
 let poolA: pg.Pool;
@@ -143,7 +145,7 @@ describe.skipIf(!ownerUrl || !appUrl)('PgRepo: unidade de trabalho sobre o Postg
     expect(first?.attempts).toBe(1);
     // O Runner "morre": nenhum heartbeat. Antes do lease vencer, a varredura não faz nada.
     expect(await B.uow(org, 'write', ({ orchestrator }) => orchestrator.sweep())).toEqual({ requeued: 0, failed: 0, expiredExecutions: 0 });
-    await new Promise((r) => setTimeout(r, 500));
+    clockSkewMs += 61_000; // passa o lease sem esperar
     expect(await B.uow(org, 'write', ({ orchestrator }) => orchestrator.sweep())).toEqual({ requeued: 1, failed: 0, expiredExecutions: 0 });
     const second = await B.uow(org, 'write', ({ orchestrator }) => orchestrator.claimTask(org, 'runner-novo'));
     expect(second?.attempts).toBe(2);

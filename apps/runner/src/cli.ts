@@ -2,9 +2,9 @@
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { SignedJob } from '@command-ai/shared/signing';
-import { AnthropicModelClient } from './agent/anthropic-client.ts';
 import { demoModel } from './agent/demo-model.ts';
 import { agentExecutor } from './agent/executor.ts';
+import { createModelFor, providerCheck } from './agent/providers.ts';
 import { DockerSandbox, probeDocker, type Sandbox } from './agent/sandbox.ts';
 import { simulatedExecutor } from './executors.ts';
 import { processNextJob, type RunnerClient } from './runner.ts';
@@ -113,9 +113,10 @@ const client: RunnerClient = {
   },
 };
 
-const anthropicKey = process.env.ANTHROPIC_API_KEY;
+// Algum provedor configurado no ambiente deste Runner? (Ollama conta quando a URL foi definida: ele roda local e não tem chave.)
+const anyProvider = !!(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.DEEPSEEK_API_KEY || process.env.OLLAMA_BASE_URL);
 // RUNNER_EXECUTOR: agent (modelo real, padrão se houver chave) | agent-demo (roteiro fixo, sem chave) | simulated (padrão sem chave).
-const mode = process.env.RUNNER_EXECUTOR ?? (anthropicKey ? 'agent' : 'simulated');
+const mode = process.env.RUNNER_EXECUTOR ?? (anyProvider ? 'agent' : 'simulated');
 const num = (name: string, fallback: number) => {
   const v = Number(process.env[name]);
   return Number.isFinite(v) && v > 0 ? v : fallback;
@@ -136,12 +137,12 @@ if (process.env.RUNNER_SANDBOX !== 'off') {
 
 let executor = simulatedExecutor;
 if (mode === 'agent' || mode === 'agent-demo') {
-  if (mode === 'agent' && !anthropicKey) {
-    console.error('RUNNER_EXECUTOR=agent exige ANTHROPIC_API_KEY.');
+  if (mode === 'agent' && !anyProvider) {
+    console.error('RUNNER_EXECUTOR=agent exige a chave de ao menos um provedor (ANTHROPIC_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY) ou OLLAMA_BASE_URL.');
     process.exit(1);
   }
   executor = agentExecutor({
-    createModel: (job) => (mode === 'agent-demo' ? demoModel(job.model, { subtasks: process.env.RUNNER_DEMO_SUBTASKS === '1', messages: process.env.RUNNER_DEMO_MESSAGES === '1' }) : new AnthropicModelClient({ apiKey: anthropicKey!, model: job.model })),
+    createModel: (job) => (mode === 'agent-demo' ? demoModel(job.model, { subtasks: process.env.RUNNER_DEMO_SUBTASKS === '1', messages: process.env.RUNNER_DEMO_MESSAGES === '1' }) : createModelFor(job)),
     dataDir: process.env.RUNNER_DATA_DIR ?? join(homedir(), '.command-ai-runner'),
     sandbox,
     allowDirectWrites: process.env.RUNNER_ALLOW_DIRECT_WRITES === '1',
@@ -158,8 +159,9 @@ if (mode === 'agent' || mode === 'agent-demo') {
   });
 }
 console.log(`Runner conectado a ${apiUrl}`);
-console.log(`Executor: ${mode === 'agent' ? 'agente (Anthropic Messages API)' : mode === 'agent-demo' ? 'agente de demonstração (roteiro fixo, sem chave)' : 'simulado (defina ANTHROPIC_API_KEY para o agente real)'}`);
+console.log(`Executor: ${mode === 'agent' ? 'agente (modelo escolhido pelo provedor de cada agente)' : mode === 'agent-demo' ? 'agente de demonstração (roteiro fixo, sem chave)' : 'simulado (defina a chave de um provedor, por exemplo ANTHROPIC_API_KEY, para o agente real)'}`);
 if (mode !== 'simulated') console.log(`Sandbox de comandos: ${sandboxNote}`);
+if (mode === 'agent') for (const line of providerCheck()) console.log(`Provedor ${line}`);
 console.log(`Workspaces autorizados: ${allowedWorkspaces.join(', ')}`);
 
 let running = true;
