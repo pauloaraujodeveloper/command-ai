@@ -81,7 +81,7 @@ describe('mensagens entre tarefas (agentes)', () => {
   it('o trabalho traz o plano da execução (os outros nomes e situações) para o agente saber a quem escrever', async () => {
     const { runner, execId } = await scenario();
     const a = await claim(runner);
-    expect(a.payload.peers).toEqual([{ taskId: 'b', title: 'Executar', status: 'pending' }]);
+    expect(a.payload.peers).toEqual([{ taskId: 'b', title: 'Executar', status: 'pending', agent: 'Ag' }]);
     expect(a.payload.taskId).toBe(`${execId}:a`);
   });
 
