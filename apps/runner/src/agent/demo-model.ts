@@ -4,7 +4,7 @@ import type { ModelClient, ModelTurn, ToolCall } from './types.ts';
  * Modelo de demonstração: um roteiro fixo, sem rede e sem chave. Serve para validar de ponta a ponta o laço do agente,
  * o worktree, o sandbox, o relato de uso e a aprovação humana sem gastar tokens. NÃO é inteligência de verdade.
  */
-export function demoModel(modelName = 'demo', opts: { subtasks?: boolean; messages?: boolean } = {}): ModelClient {
+export function demoModel(modelName = 'demo', opts: { subtasks?: boolean; messages?: boolean; team?: boolean } = {}): ModelClient {
   const call = (id: string, name: string, input: Record<string, unknown>): ToolCall => ({ id, name, input });
 
   const report = [
@@ -47,6 +47,71 @@ export function demoModel(modelName = 'demo', opts: { subtasks?: boolean; messag
     { text: `Concluído: SUBTAREFA-${n}.md criado.`, tools: [] as ToolCall[] },
   ];
 
+  // Equipe: o orquestrador delega a cada especialista (pelo domínio); cada um escreve no próprio escopo.
+  // O front-end tenta escrever na API (recusado pelo escopo) e então registra o pedido; a API avisa o front-end do contrato.
+  const teamScript = (prompt: string): Array<{ text: string; tools: ToolCall[] }> => {
+    const marks = [/Equipe-DB:/, /Equipe-API:/, /Equipe-WEB:/, /Equipe-INFRA:/, /Analisar/, /Executar/, /Revisar/];
+    let mine = -1;
+    let at = Infinity;
+    marks.forEach((re, i) => {
+      const k = prompt.search(re);
+      if (k >= 0 && k < at) {
+        at = k;
+        mine = i;
+      }
+    });
+    const write = (id: string, path: string, content: string): ToolCall => call(id, 'write_file', { path, content });
+    switch (mine) {
+      case 0:
+        return [
+          { text: 'Modelando o banco.', tools: [write('b1', 'db/migrations/001_pedidos.sql', 'CREATE TABLE pedidos (id uuid PRIMARY KEY);\n')] },
+          { text: 'Concluído: migração criada.', tools: [] as ToolCall[] },
+        ];
+      case 1:
+        return [
+          { text: 'Implementando a API.', tools: [write('a1', 'apps/api/pedidos.ts', 'export const rota = "/pedidos";\n')] },
+          { text: 'Avisando o front-end do contrato.', tools: [call('a2', 'send_message', { to: 'web', content: 'Contrato: GET /pedidos devolve { items: [] }.' })] },
+          { text: 'Concluído: API criada e contrato enviado.', tools: [] as ToolCall[] },
+        ];
+      case 2: {
+        const got = /<mensagem_de_agente [^>]*>\n([\s\S]*?)\n<\/mensagem_de_agente>/.exec(prompt)?.[1] ?? '(nenhuma mensagem)';
+        return [
+          { text: 'Tentando alterar a API (não é minha área).', tools: [write('w1', 'apps/api/pedidos.ts', 'alterado pelo front\n')] },
+          { text: 'Escrevendo a tela com o contrato recebido.', tools: [write('w2', 'apps/web/pedidos.tsx', `// ${got.replace(/\n/g, ' ')}\n`)] },
+          { text: 'Concluído: tela criada; a API fica com o back-end.', tools: [] as ToolCall[] },
+        ];
+      }
+      case 3:
+        return [
+          { text: 'Preparando o contêiner.', tools: [write('i1', 'Dockerfile', 'FROM node:24-alpine\n')] },
+          { text: 'Concluído: Dockerfile criado.', tools: [] as ToolCall[] },
+        ];
+      case 4:
+        return [
+          { text: 'Vou explorar o projeto.', tools: [call('t1', 'list_dir', { path: '.' })] },
+          {
+            text: 'Delegando à equipe.',
+            tools: [
+              call('t2', 'plan_subtasks', {
+                tasks: [
+                  { id: 'db', title: 'Equipe-DB: criar a migração de pedidos', agent: 'database', risk: 'low' },
+                  { id: 'api', title: 'Equipe-API: criar a rota de pedidos', agent: 'backend', dependsOn: ['db'], risk: 'low' },
+                  { id: 'web', title: 'Equipe-WEB: criar a tela de pedidos', agent: 'frontend', dependsOn: ['api'], risk: 'low' },
+                  { id: 'infra', title: 'Equipe-INFRA: criar o Dockerfile', agent: 'infra', risk: 'low' },
+                ],
+              }),
+            ],
+          },
+          { text: 'Concluído: deleguei às quatro áreas.', tools: [] as ToolCall[] },
+        ];
+      default:
+        return [
+          { text: 'Conferindo o que a equipe deixou.', tools: [call('t3', 'list_dir', { path: '.' })] },
+          { text: 'Concluído: conferi o resultado da equipe.', tools: [] as ToolCall[] },
+        ];
+    }
+  };
+
   return {
     model: modelName,
     async turn(req): Promise<ModelTurn> {
@@ -71,7 +136,8 @@ export function demoModel(modelName = 'demo', opts: { subtasks?: boolean; messag
           ];
         }
       }
-      if (opts.subtasks) {
+      if (opts.team) script = teamScript(prompt);
+      else if (opts.subtasks) {
         if (/^Analisar/.test(prompt)) script = delegating;
         else if (/^Subtarefa: criar/.test(prompt)) script = child(1);
         else if (/^Subtarefa: conferir/.test(prompt)) script = child(2);

@@ -180,8 +180,13 @@ describe('servidor MCP do Runner: segurança', () => {
     expect((await rpc({ jsonrpc: '2.0', id: 1, method: 'ping' }, { origin: 'https://evil.example' })).status).toBe(403);
     expect((await fetch(s.url, { method: 'GET', headers: { authorization: `Bearer ${TOKEN}` } })).status).toBe(405);
     expect((await rpc({ jsonrpc: '2.0', id: 1, method: 'ping' }, {}, `${new URL(s.url).origin}/outro`)).status).toBe(404);
-    const big = await fetch(s.url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` }, body: 'x'.repeat(1_100_000) });
-    expect(big.status).toBe(413);
+    // O servidor recusa com 413 e pode fechar a conexão enquanto o cliente ainda envia o corpo: sob carga isso aparece como "fetch failed".
+    // Os dois desfechos são a recusa; o que não pode acontecer é aceitar.
+    const big = await fetch(s.url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` }, body: 'x'.repeat(1_100_000) }).then(
+      (r) => r.status,
+      () => 'conexão encerrada',
+    );
+    expect([413, 'conexão encerrada']).toContain(big);
     const wrong = await fetch(s.url, { method: 'POST', headers: { 'content-type': 'text/plain', authorization: `Bearer ${TOKEN}` }, body: '{}' });
     expect(wrong.status).toBe(415);
   });

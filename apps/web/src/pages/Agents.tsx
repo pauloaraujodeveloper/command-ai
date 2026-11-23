@@ -1,4 +1,5 @@
 import { buildHierarchy } from '@command-ai/shared/hierarchy';
+import { softwareTeam } from '@command-ai/shared/team';
 import { Pencil, Trash2 } from 'lucide-react';
 import { useMemo, useState, type FormEvent } from 'react';
 import { HierarchyChart } from '../components/HierarchyChart';
@@ -54,6 +55,9 @@ export function Agents() {
   const [editing, setEditing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sw, setSw] = useState({ providerKind: 'simulated', model: 'claude-sonnet-5-5' });
+  const [swBusy, setSwBusy] = useState(false);
+  const [swDone, setSwDone] = useState(false);
 
   const list = agents.data?.items ?? [];
   const hierarchy = useMemo(() => buildHierarchy({ agents: list, withRequest: true, withResult: true }), [list]);
@@ -142,6 +146,24 @@ export function Agents() {
     }
   }
 
+  async function createSoftwareTeam() {
+    setSwBusy(true);
+    setError(null);
+    setSwDone(false);
+    try {
+      const team = softwareTeam({ providerKind: sw.providerKind as 'simulated', model: sw.model, budgetUsd: 5 });
+      const orq = await api<{ id: string }>('/agents', { method: 'POST', body: team.orchestrator, idempotent: true });
+      for (const sp of team.specialists) await api('/agents', { method: 'POST', body: { ...sp, parentAgentId: orq.id }, idempotent: true });
+      setSwDone(true);
+      await agents.reload(true);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t('err.generic'));
+      await agents.reload(true);
+    } finally {
+      setSwBusy(false);
+    }
+  }
+
   const nameOf = (id?: string) => list.find((a) => a.id === id)?.name;
 
   return (
@@ -152,6 +174,34 @@ export function Agents() {
         {agents.loading && !agents.data && <Spinner />}
         {agents.data && list.length === 0 && <Empty>{t('team.empty')}</Empty>}
         {list.length > 0 && <HierarchyChart hierarchy={hierarchy} mode="team" />}
+      </Section>
+
+      <Section title={t('agents.softwareTeam')}>
+        <div className="max-w-2xl space-y-3">
+          <p className="text-sm text-muted">{t('agents.softwareTeamHint')}</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label={t('agents.softwareProvider')}>
+              <select className={inputCls} value={sw.providerKind} onChange={(e) => setSw((x) => ({ ...x, providerKind: e.target.value }))}>
+                <option value="simulated">simulated</option>
+                <option value="anthropic">anthropic</option>
+                <option value="openai">openai</option>
+                <option value="deepseek">deepseek</option>
+                <option value="claude_code">claude_code (assinatura)</option>
+                <option value="codex">codex (assinatura)</option>
+                <option value="ollama">ollama</option>
+              </select>
+            </Field>
+            <Field label={t('agents.softwareModel')}>
+              <input className={`${inputCls} font-mono`} value={sw.model} onChange={(e) => setSw((x) => ({ ...x, model: e.target.value }))} />
+            </Field>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button type="button" disabled={swBusy || !sw.model.trim()} onClick={() => void createSoftwareTeam()}>
+              {t('agents.softwareTeam')}
+            </Button>
+            {swDone && <span role="status" className="text-sm text-done">{t('agents.softwareTeamDone')}</span>}
+          </div>
+        </div>
       </Section>
 
       <Section title={t('agents.list')}>

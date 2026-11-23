@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./signing": "./src/signing.ts",
-    "./hierarchy": "./src/hierarchy.ts"
+    "./hierarchy": "./src/hierarchy.ts",
+    "./team": "./src/team.ts"
   },
   "scripts": {
     "test": "vitest run",

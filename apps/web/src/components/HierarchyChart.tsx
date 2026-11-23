@@ -97,6 +97,14 @@ export function HierarchyChart({
               const a = boxes.get(e.from);
               const b = boxes.get(e.to);
               if (!a || !b) return null;
+              // Vizinhos na mesma linha: seta reta entre as bordas dos cartões (não cruza nada).
+              if (a.node.level === b.node.level && Math.abs(a.node.slot - b.node.slot) === 1) {
+                const right = b.x > a.x;
+                const ym = a.y + Math.min(a.h, b.h) / 2;
+                const xa = right ? a.x + W : a.x;
+                const xb = right ? b.x : b.x + W;
+                return <path key={`${e.from}>${e.to}:dep`} d={`M${xa},${ym} H${xb + (right ? -2 : 2)}`} fill="none" stroke="var(--run)" strokeWidth={2} strokeDasharray="1.5 3" strokeLinecap="round" markerEnd="url(#ca-dep-arrow)" />;
+              }
               const x1 = a.x + W / 2 + 14;
               const x2 = b.x + W / 2 - 14;
               const y1 = a.y + a.h;

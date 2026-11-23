@@ -169,7 +169,7 @@ if (mode === 'agent' || mode === 'agent-demo') {
     process.exit(1);
   }
   executor = agentExecutor({
-    createModel: (job) => (mode === 'agent-demo' ? demoModel(job.model, { subtasks: process.env.RUNNER_DEMO_SUBTASKS === '1', messages: process.env.RUNNER_DEMO_MESSAGES === '1' }) : createModelFor(job)),
+    createModel: (job) => (mode === 'agent-demo' ? demoModel(job.model, { subtasks: process.env.RUNNER_DEMO_SUBTASKS === '1', messages: process.env.RUNNER_DEMO_MESSAGES === '1', team: process.env.RUNNER_DEMO_TEAM === '1' }) : createModelFor(job)),
     dataDir: process.env.RUNNER_DATA_DIR ?? join(homedir(), '.command-ai-runner'),
     sandbox,
     allowDirectWrites: process.env.RUNNER_ALLOW_DIRECT_WRITES === '1',

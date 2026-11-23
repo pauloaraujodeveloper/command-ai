@@ -102,6 +102,14 @@ node scripts/e2e-agent.mjs                  # 43 verificações; E2E_SANDBOX_IMA
 node scripts/demo-pending-approval.mjs      # sobe o painel em http://127.0.0.1:3097 com uma aprovação de ferramenta pendente
 ```
 
+## Equipe hierárquica
+
+- **Criar a equipe:** tela Agentes → “Criar time de software” (orquestrador somente leitura + front-end, back-end, banco, infra). Depois ajuste domínio, responsabilidades, “onde pode alterar arquivos” e dependências ao seu projeto (a edição é o lápis ao lado de cada agente).
+- **PRD:** tela Projetos → “Editar PRD” (Markdown, até 100 mil caracteres). O orquestrador recebe tudo; cada especialista, um trecho.
+- **Escopo de escrita:** um padrão por linha (`apps/web/**`; `**` atravessa pastas; sem barra vale só na raiz). Escrever fora é recusado na ferramenta e, de novo, ao concluir a tarefa (o resultado não é aceito). “Somente leitura” = lista vazia.
+- **Ver a hierarquia:** tela Agentes (estrutura) e a execução, aba “Agentes” (estado por agente, tarefas, dependências e mensagens). Clique num agente para filtrar a linha do tempo.
+- **Teste sem chave:** `node apps/runner/scripts/e2e-team.mjs` (Docker local; `RUNNER_DEMO_TEAM=1` usa o roteiro fixo da equipe).
+
 ## Idempotency-Key
 
 POST de `/executions`, `/agents`, `/projects` e `/providers` aceita `Idempotency-Key` (8 a 128 caracteres: letras, números, `_ . : -`). Repetir a mesma chave com o mesmo corpo devolve a resposta original; o corpo diferente ou outra rota devolve 422 `idempotency_key_reuse`. As respostas ficam guardadas por 24 h (registro `idempotency` no banco, no máximo 500 por organização). Falhas (4xx/5xx) não são guardadas, então repetir depois de um erro executa de novo.

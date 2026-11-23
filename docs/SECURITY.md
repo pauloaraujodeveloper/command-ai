@@ -73,6 +73,12 @@ Resumo do que está implementado e testado, e do que ainda falta. Nada aqui gara
 
 O que **não** foi feito: nenhum teste com o modelo real, nenhuma auditoria externa, nenhum teste de escape de contêiner além das propriedades verificadas em `sandbox.test.ts`.
 
+### Equipe hierárquica
+
+- Escopo de escrita por agente aplicado em três camadas (ferramenta, `finalize` do worktree e executores por assinatura); casamento de padrões sem regex (teste de padrão malicioso). Testes: `scope.test.ts`, `team-runner.test.ts`, `team.test.ts` e o e2e `e2e-team.mjs`.
+- Delegação restrita ao próprio agente e a descendentes dentro de uma hierarquia; a criação de subtarefas segue exigindo aprovação humana. Hierarquia validada no servidor (profundidade, ciclo, domínio único, organização).
+- O PRD do projeto e as mensagens entre agentes entram no prompt delimitados e rotulados como dados não confiáveis. Limite conhecido: o delimitador reduz, não elimina, a injeção de prompt.
+
 ## Pendências conhecidas
 
 - **Passkeys** não existem (previstas para uma segunda etapa). O Neon Auth gerenciado não oferece MFA; o app cobre isso com o próprio TOTP.
