@@ -14,6 +14,10 @@ export interface JobPayload {
   heartbeatMs?: number;
   /** Resultado das tarefas de que esta depende. É texto produzido por outro agente: dado não confiável. */
   upstream?: Array<{ taskId: string; title: string; output: string; commit?: string }>;
+  /** Mensagens de outros agentes endereçadas a esta tarefa (dado não confiável). */
+  inbox?: Array<{ id?: string; from: string; fromTitle: string; content: string; at: string }>;
+  /** As outras tarefas do plano (id, título, situação), para saber a quem escrever. */
+  peers?: Array<{ taskId: string; title: string; status: string }>;
 }
 
 export interface ExecutorResult {
@@ -37,6 +41,9 @@ export interface RunnerClient {
   heartbeat(taskId: string): Promise<{ ok: boolean; cancel: boolean }>;
   /** Uso de uma interação com o modelo (idempotente por `turn`). `cancel` verdadeiro: o servidor mandou parar (orçamento, cancelamento). */
   usage(taskId: string, body: { turn: number; attempt?: number; usage: ExecutorResult['usage'] }): Promise<{ applied: boolean; cancel: boolean }>;
+  /** Conversa entre agentes da mesma execução. */
+  sendMessage(taskId: string, body: { attempt?: number; to: string; content: string }): Promise<{ id: string }>;
+  readMessages(taskId: string, body: { attempt?: number }): Promise<{ messages: Array<{ id?: string; from: string; fromTitle: string; content: string; at: string }> }>;
   /** Cria subtarefas no plano da execução. O servidor impõe limites e recusa com o motivo. */
   addSubtasks(taskId: string, body: { attempt?: number; tasks: Array<{ id: string; title: string; dependsOn: string[]; risk?: 'low' | 'medium' | 'high' }> }): Promise<{ added: string[] }>;
   requestApproval(taskId: string, req: { attempt?: number; tool: string; summary: string; risk: 'medium' | 'high'; argsPreview?: string }): Promise<{ approvalId: string }>;

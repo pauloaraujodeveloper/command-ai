@@ -210,10 +210,30 @@ try {
   check('C: o resultado da execução acumula o trabalho das subtarefas (commits combinados)', /SUBTAREFA-1\.md/.test(tree) && /SUBTAREFA-2\.md/.test(tree), tree.split('\n').filter((l) => /SUBTAREFA|AGENTE/.test(l)).join(','));
   check('C: o branch e a árvore da pessoa continuam intactos', git('rev-parse', 'HEAD').toString().trim() === headBefore && git('status', '--porcelain').toString().trim() === '');
 
+  /* ---- D: agentes trocam mensagens (Fase 4) ---- */
+  // Runner com o modelo de demonstração que conversa: a análise avisa a revisão; a revisão registra o aviso num arquivo.
+  stopOne(rp2);
+  start('runner3', 'npx', ['tsx', 'src/cli.ts'], join(root, 'apps/runner'), runnerEnv({ RUNNER_DEMO_MESSAGES: '1' }));
+  const rp3 = procs.at(-1);
+  await waitFor(async () => rp3.logs.includes('Sandbox de comandos'), 30_000, 'Runner 3 subir');
+  const D = await runExecution('conversando', 'approved');
+  check('D: execução concluída', D.exec.status === 'succeeded', D.exec.status);
+  const msgs = (await api('GET', `/executions/${D.exec.id}/messages`)).items;
+  check('D: a mensagem da análise para a revisão ficou registrada e visível para a pessoa', msgs.length === 1 && msgs[0].from === 'analise' && msgs[0].to === 'revisao' && /README\.md/.test(msgs[0].content), JSON.stringify(msgs.map((m) => [m.from, m.to])));
+  const evD = (await api('GET', `/executions/${D.exec.id}/events?format=json`));
+  const itemsD = evD.items ?? evD.events ?? evD;
+  check('D: o histórico tem o evento message.sent (monitoramento)', itemsD.some((e) => e.type === 'message.sent' && e.payload?.from === 'analise' && e.payload?.to === 'revisao'));
+  const rev = D.taskList.find((t) => t.planId === 'revisao');
+  const recebido = git('show', `${rev.workspaceCommit}:MENSAGEM-RECEBIDA.md`).toString();
+  check('D: a revisão recebeu a mensagem junto com o trabalho (caixa de entrada) e a registrou', /README\.md/.test(recebido), recebido.split('\n').filter(Boolean).slice(-1)[0]);
+  const logsD = JSON.stringify(itemsD.filter((e) => e.type === 'log.appended'));
+  check('D: as ferramentas de mensagem rodaram (enviar e ler)', /Resultado send_message: ok/.test(logsD) && /Resultado read_messages: ok/.test(logsD));
+  check('D: o branch e a árvore da pessoa continuam intactos', git('rev-parse', 'HEAD').toString().trim() === headBefore && git('status', '--porcelain').toString().trim() === '');
+
   /* ---- sandbox não deixa lixo ---- */
   const leftovers = execFileSync('docker', ['ps', '-a', '--filter', 'name=ca-sbx-', '--format', '{{.Names}}'], { stdio: 'pipe' }).toString().trim();
   check('Nenhum contêiner de sandbox sobrando', leftovers === '', leftovers);
-  check('Runners sem erros de comunicação', !/Erro de comunica/.test(rp.logs) && !/Erro de comunica/.test(rp2.logs));
+  check('Runners sem erros de comunicação', !/Erro de comunica/.test(rp.logs) && !/Erro de comunica/.test(rp2.logs) && !/Erro de comunica/.test(rp3.logs));
 } catch (err) {
   check(`erro inesperado: ${err instanceof Error ? err.message : err}`, false);
   for (const p of procs) console.log(`--- log ${p.name} (fim) ---\n${p.logs.slice(-1500)}`);

@@ -2,6 +2,7 @@ import type { Executor, JobPayload } from '../runner.ts';
 import { buildSystemPrompt, runAgent, type AgentLimits } from './loop.ts';
 import type { Sandbox } from './sandbox.ts';
 import type { ModelClient } from './types.ts';
+import { renderMessages } from './tools.ts';
 import { createTaskWorkspace } from './worktree.ts';
 
 export interface AgentExecutorOptions {
@@ -19,6 +20,17 @@ const MAX_PATCH_IN_OUTPUT = 20_000;
 
 /** Tarefa + resultado das anteriores. O que veio de outros agentes entra delimitado e rotulado como dado não confiável. */
 export function buildPrompt(job: JobPayload): string {
+  const parts = [buildUpstreamPrompt(job)];
+  const peers = job.peers ?? [];
+  if (peers.length > 0) {
+    const list = peers.map((p) => `- ${p.taskId.replace(/[^\w-]/g, '_')}: ${p.title.replace(/[\r\n<>]/g, ' ').slice(0, 120)} (${p.status})`);
+    parts.push(['Plano desta execução (outras tarefas, com o id para usar em send_message):', ...list, 'Você pode combinar com elas por send_message e ler o que chegou com read_messages.'].join('\n'));
+  }
+  if ((job.inbox ?? []).length > 0) parts.push(renderMessages(job.inbox!));
+  return parts.join('\n\n');
+}
+
+function buildUpstreamPrompt(job: JobPayload): string {
   const up = job.upstream ?? [];
   if (up.length === 0) return job.prompt;
   const blocks = up.map((u) => {

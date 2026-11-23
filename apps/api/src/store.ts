@@ -170,6 +170,19 @@ export interface Task {
   lastUsageTurn?: number;
   position: number;
 }
+/** Mensagem de um agente para outro dentro da mesma execução. O conteúdo é texto de modelo: dado não confiável. */
+export interface TaskMessage {
+  id: string;
+  organizationId: string;
+  executionId: string;
+  fromTaskId: string;
+  toTaskId: string;
+  content: string;
+  createdAt: string;
+  /** Tentativa do destinatário que já recebeu esta mensagem (uma nova tentativa recebe tudo de novo). */
+  readAttempt?: number;
+}
+
 /** Resposta guardada de uma criação feita com Idempotency-Key. Vale por usuário e expira. */
 export interface IdempotencyRecord {
   id: string; // `${userId}:${chave}`
@@ -237,6 +250,7 @@ export function createStore(sink?: Sink, hooks: StoreHooks = {}) {
     tasks: new Table<Task>('task', sink),
     approvals: new Table<Approval>('approval', sink),
     idempotency: new Table<IdempotencyRecord>('idempotency', sink),
+    messages: new Table<TaskMessage>('message', sink),
     runners: new Table<Runner>('runner', sink),
 
     hydrateEvents(list: EventEnvelope[]): void {

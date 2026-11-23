@@ -89,6 +89,10 @@ export function ExecutionLive() {
           text: `${Number(p.inputTokens) + Number(p.outputTokens)} ${t('runs.tokens')} · ${p.costAvailable ? money(Number(p.costUsd)) : t('runs.costUnknown')}`,
           tone: 'text-muted',
         };
+      case 'plan.updated':
+        return { text: `Plano ampliado por ${taskTitle || String(p.by ?? '')}: ${((p.titles as string[] | undefined) ?? []).join('; ')}`, tone: 'text-wait' };
+      case 'message.sent':
+        return { text: `Mensagem de ${String(p.from ?? '')} para ${String(p.to ?? '')}: ${String(p.preview ?? '')}`, tone: 'text-fg', mono: true };
       case 'alert.raised':
         return { text: String(p.message ?? ''), tone: p.level === 'error' ? 'text-fail' : 'text-wait' };
       default:

@@ -111,6 +111,7 @@ export const EVENT_TYPES = [
   'approval.decided',
   'usage.updated',
   'plan.updated',
+  'message.sent',
   'alert.raised',
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
@@ -240,6 +241,17 @@ export const subtasksRequestSchema = z.object({
     .min(1)
     .max(MAX_SUBTASKS_PER_CALL),
 });
+
+/** Mensagens entre tarefas (agentes) da mesma execução. */
+export const MAX_MESSAGE_CHARS = 2000;
+export const MAX_MESSAGES_PER_TASK = 20;
+export const sendMessageSchema = z.object({
+  attempt: z.number().int().positive().optional(),
+  /** Id da tarefa de destino no plano (o mesmo `planId`). */
+  to: z.string().regex(/^[a-z0-9_-]{1,40}$/i, 'id inválido'),
+  content: z.string().trim().min(1).max(MAX_MESSAGE_CHARS),
+});
+export const readMessagesSchema = z.object({ attempt: z.number().int().positive().optional() });
 
 export const runnerReportSchema = z.object({
   /** Tentativa a que o relatório se refere; relatórios de tentativas antigas são ignorados. */

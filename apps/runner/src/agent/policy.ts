@@ -17,7 +17,8 @@ export interface ApprovalClient {
   approvalStatus(taskId: string, approvalId: string): Promise<{ status: string; reason?: string } | null>;
 }
 
-const READ_ONLY = new Set(['list_dir', 'read_file', 'search_files']);
+// Mensagens entre agentes são só texto, com teto no servidor, e ficam visíveis no histórico: não pedem aprovação.
+const READ_ONLY = new Set(['list_dir', 'read_file', 'search_files', 'send_message', 'read_messages']);
 
 /** Uma linha limpa para a pessoa ler. Texto vindo do modelo nunca chega cru à tela de aprovação. */
 // eslint-disable-next-line no-control-regex

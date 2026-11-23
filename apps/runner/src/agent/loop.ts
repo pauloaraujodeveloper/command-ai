@@ -1,7 +1,7 @@
 import { redactSecrets } from '../runner.ts';
 import { awaitApproval, decide, type ApprovalClient } from './policy.ts';
 import type { Sandbox } from './sandbox.ts';
-import { runTool, TOOLS, toolSpecs, validateInput, type SubtaskInput, type WorkspaceInfo } from './tools.ts';
+import { runTool, TOOLS, toolSpecs, validateInput, type InboxMessage, type SubtaskInput, type WorkspaceInfo } from './tools.ts';
 import type { AgentMessage, ModelClient, ToolCall, ToolResultMessage, TurnUsage } from './types.ts';
 
 export interface AgentLimits {
@@ -21,6 +21,9 @@ export interface AgentClient extends ApprovalClient {
   usage(taskId: string, body: { turn: number; attempt?: number; usage: Omit<TurnUsage, never> }): Promise<{ applied: boolean; cancel: boolean }>;
   /** Cria subtarefas no plano. Ausente: a ferramenta `plan_subtasks` não é oferecida. */
   addSubtasks?(taskId: string, body: { attempt?: number; tasks: SubtaskInput[] }): Promise<{ added: string[] }>;
+  /** Conversa entre agentes. Ausentes: as ferramentas `send_message` e `read_messages` não são oferecidas. */
+  sendMessage?(taskId: string, body: { attempt?: number; to: string; content: string }): Promise<{ id: string }>;
+  readMessages?(taskId: string, body: { attempt?: number }): Promise<{ messages: InboxMessage[] }>;
 }
 
 export interface AgentDeps {
@@ -100,7 +103,8 @@ export async function runAgent(deps: AgentDeps): Promise<AgentResult> {
   };
 
   const planning = typeof client.addSubtasks === 'function';
-  const tools = toolSpecs(deps.workspace.kind, { sandbox: !!deps.sandbox, planning });
+  const messaging = typeof client.sendMessage === 'function' && typeof client.readMessages === 'function';
+  const tools = toolSpecs(deps.workspace.kind, { sandbox: !!deps.sandbox, planning, messaging });
   const offered = new Set(tools.map((t) => t.name));
 
   const messages: AgentMessage[] = [{ role: 'user', content: deps.prompt }];
@@ -159,6 +163,8 @@ export async function runAgent(deps: AgentDeps): Promise<AgentResult> {
       sandbox: deps.sandbox,
       commandTimeoutMs: deps.commandTimeoutMs,
       planSubtasks: planning ? (tasks) => client.addSubtasks!(deps.taskId, { attempt: deps.attempt, tasks }) : undefined,
+      sendMessage: messaging ? async (to, content) => void (await client.sendMessage!(deps.taskId, { attempt: deps.attempt, to, content })) : undefined,
+      readMessages: messaging ? async () => (await client.readMessages!(deps.taskId, { attempt: deps.attempt })).messages : undefined,
     });
     deps.emit(`Resultado ${c.name}: ${r.isError ? 'erro' : 'ok'} — ${short(r.content, 100)}`);
     return { toolCallId: c.id, content: r.content, isError: !!r.isError };

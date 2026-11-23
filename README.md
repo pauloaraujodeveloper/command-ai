@@ -22,7 +22,7 @@ Requisitos: Node 22+ e pnpm 10 (`npm i -g pnpm`).
 
 ```powershell
 pnpm install
-pnpm test          # 380 testes (os de Postgres, Redis e Docker rodam contra serviços reais e são ignorados sem eles)
+pnpm test          # 402 testes (os de Postgres, Redis e Docker rodam contra serviços reais e são ignorados sem eles)
 pnpm build
 ```
 
@@ -59,7 +59,7 @@ pnpm runner
 ```
 
 Sem `ANTHROPIC_API_KEY` o Runner usa o executor simulado (não gasta tokens). Com a chave (`RUNNER_EXECUTOR=agent`) ele roda o **agente**: várias interações com o modelo, ferramentas de arquivo num worktree Git isolado, comandos só num contêiner Docker (imagem local, sem rede) e aprovação humana para operações críticas. O resultado vem como patch para você revisar; nada é aplicado à sua pasta. Detalhes, variáveis e limites em [docs/RUNBOOK.md](docs/RUNBOOK.md#agente-e-sandbox-runner) e [ADR 0005](docs/adr/0005-agente-e-sandbox.md).
-Para ver o fluxo sem chave: `node apps/runner/scripts/e2e-agent.mjs` (modelo de demonstração, Docker local, 30 verificações).
+Para ver o fluxo sem chave: `node apps/runner/scripts/e2e-agent.mjs` (modelo de demonstração, Docker local, 36 verificações).
 
 ## Web, PWA e desktop
 
@@ -77,6 +77,7 @@ Feito e testado:
 - Organização em todo registro e isolamento entre organizações, com testes de acesso cruzado.
 - Plano editável com validação de ciclos, dependências, aprovação humana para risco alto, novas tentativas com espera progressiva e parada por orçamento.
 - **Confiabilidade (Fase 2):** API sem estado em memória, com várias instâncias sobre o mesmo PostgreSQL; reivindicação de tarefa atômica; lease com heartbeat e recuperação de tarefas de Runner que sumiu (Worker + BullMQ); prazo máximo de execução; relatórios idempotentes e com número da tentativa; cancelamento que chega ao Runner e o interrompe.
+- **Comunicação entre agentes (Fase 4):** as tarefas de uma execução trocam mensagens (`send_message`, `read_messages`); o plano e a caixa de entrada vão junto com o trabalho; tudo fica registrado e visível (linha do tempo e histórico); o conteúdo chega como dado não confiável. Testada com tarefas em sequência com processos reais e com tarefas simultâneas na API.
 - **Subtarefas e replanejamento (Fase 4):** o agente pode propor subtarefas (`plan_subtasks`, com aprovação humana); elas entram no plano, herdam o resultado da tarefa criadora e as tarefas seguintes passam a esperar por elas. Limites: 5 por chamada, 25 tarefas e geração 2 por execução.
 - **`Idempotency-Key`** nas criações de execução, agente, projeto e provedor: a mesma chave e o mesmo pedido devolvem a resposta guardada (cabeçalho `Idempotent-Replayed: true`), outro pedido com a mesma chave é recusado (422); vale por usuário, por 24 h, no máximo 500 por organização; o painel envia a chave sozinho. Criação de Runner fica de fora de propósito (a resposta tem o token).
 - **Limite de tentativas de login e MFA compartilhado entre instâncias** (10 falhas em 15 minutos por IP e e-mail) quando há `REDIS_URL`: contagem atômica no Redis, que só vê um hash da chave. Se o Redis cair, cada instância segue limitando em memória (o login não trava). Sem `REDIS_URL`, vale por processo e o servidor avisa na partida.
@@ -96,7 +97,7 @@ Ainda não feito (previsto no PRD):
 | Passkeys (WebAuthn), códigos de recuperação do MFA e login do Runner por código de dispositivo | Não implementados. O Runner usa token revogável |
 | Modelo de dados normalizado (Prisma) | Hoje os registros ficam em JSONB por tipo, sempre com `organization_id` |
 | Agente com o modelo real | Implementado e testado com respostas simuladas no formato da API; **a primeira execução com chave pode revelar ajustes** (esquemas estritos, autenticação do SDK, raciocínio entre turnos) |
-| Orquestração multiagente (Fase 4), partes restantes | Feito: tarefas encadeadas e subtarefas criadas pelo agente (com aprovação humana e limites). Falta: comunicação entre agentes enquanto trabalham, escolha de outro agente para a subtarefa pelo modelo (hoje o padrão é o mesmo agente), execução paralela comprovada com vários Runners (o commit só existe no Runner que rodou a tarefa) |
+| Orquestração multiagente (Fase 4), partes restantes | Feito: tarefas encadeadas e subtarefas criadas pelo agente (com aprovação humana e limites). Falta: escolha de outro agente para a subtarefa pelo modelo (hoje o padrão é o mesmo agente), execução paralela comprovada com vários Runners (o commit só existe no Runner que rodou a tarefa) |
 | Sandbox mais forte que Docker comum (gVisor/Firecracker, imagem por digest) | Não implementado. O sandbox atual compartilha o kernel do Docker |
 | Claude Agent SDK / Claude Code como executor | Não usado de propósito (ADR 0005): o laço é próprio, sobre o SDK da Messages API |
 | Codex SDK, MCP, CLI `commandai`, Kanban, base de conhecimento, e-mail e Slack | Não implementados |

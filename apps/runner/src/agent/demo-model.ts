@@ -4,7 +4,7 @@ import type { ModelClient, ModelTurn, ToolCall } from './types.ts';
  * Modelo de demonstração: um roteiro fixo, sem rede e sem chave. Serve para validar de ponta a ponta o laço do agente,
  * o worktree, o sandbox, o relato de uso e a aprovação humana sem gastar tokens. NÃO é inteligência de verdade.
  */
-export function demoModel(modelName = 'demo', opts: { subtasks?: boolean } = {}): ModelClient {
+export function demoModel(modelName = 'demo', opts: { subtasks?: boolean; messages?: boolean } = {}): ModelClient {
   const call = (id: string, name: string, input: Record<string, unknown>): ToolCall => ({ id, name, input });
 
   const report = [
@@ -54,6 +54,23 @@ export function demoModel(modelName = 'demo', opts: { subtasks?: boolean } = {})
       const first = req.messages[0];
       const prompt = first && first.role === 'user' ? first.content : '';
       let script = steps;
+      if (opts.messages) {
+        if (/^Analisar/.test(prompt)) {
+          script = [
+            { text: 'Vou explorar o projeto.', tools: [call('m1', 'list_dir', { path: '.' })] },
+            { text: 'Avisando a revisão.', tools: [call('m2', 'send_message', { to: 'revisao', content: 'Aviso da análise: confira com atenção o arquivo README.md.' })] },
+            { text: 'Concluído: deixei um aviso para a revisão.', tools: [] as ToolCall[] },
+          ];
+        } else if (/^Revisar/.test(prompt)) {
+          // A mensagem chega no prompt (caixa de entrada entregue com o trabalho); o agente a copia para um arquivo.
+          const got = /<mensagem_de_agente [^>]*>\n([\s\S]*?)\n<\/mensagem_de_agente>/.exec(prompt)?.[1] ?? '(nenhuma mensagem)';
+          script = [
+            { text: 'Lendo mensagens novas.', tools: [call('r1', 'read_messages', {})] },
+            { text: 'Registrando o que recebi.', tools: [call('r2', 'write_file', { path: 'MENSAGEM-RECEBIDA.md', content: `# Mensagem recebida\n\n${got}\n` })] },
+            { text: 'Concluído: registrei a mensagem recebida.', tools: [] as ToolCall[] },
+          ];
+        }
+      }
       if (opts.subtasks) {
         if (/^Analisar/.test(prompt)) script = delegating;
         else if (/^Subtarefa: criar/.test(prompt)) script = child(1);

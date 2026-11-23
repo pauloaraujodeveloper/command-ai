@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { EVENT_TYPES } from '@command-ai/shared';
 import { ApiError, type EventEnvelope } from './api';
 
 export function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = [], refetchMs?: number) {
@@ -31,15 +32,7 @@ export function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = [], refetchM
   return { data, error, loading, reload };
 }
 
-const EVENT_TYPES = [
-  'execution.state_changed',
-  'task.state_changed',
-  'log.appended',
-  'approval.requested',
-  'approval.decided',
-  'usage.updated',
-  'alert.raised',
-] as const;
+// EVENT_TYPES vem do pacote compartilhado: o SSE entrega cada tipo com nome próprio, e um tipo que falte aqui nunca chegaria à tela.
 
 /**
  * Assina os eventos de uma execução por SSE. Ao reconectar o navegador reenvia Last-Event-ID

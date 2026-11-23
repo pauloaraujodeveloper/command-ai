@@ -65,6 +65,22 @@ const client: RunnerClient = {
     const r = (await res.json()) as { applied: boolean; cancel: boolean };
     return { applied: r.applied, cancel: r.cancel };
   },
+  async sendMessage(taskId, body) {
+    const res = await call(`/tasks/${encodeURIComponent(taskId)}/messages`, body);
+    if (!res.ok) {
+      const p = (await res.json().catch(() => null)) as { detail?: string } | null;
+      throw new Error(`${p?.detail ?? 'recusado'} (HTTP ${res.status})`.slice(0, 400));
+    }
+    return (await res.json()) as { id: string };
+  },
+  async readMessages(taskId, body) {
+    const res = await call(`/tasks/${encodeURIComponent(taskId)}/messages/read`, body);
+    if (!res.ok) {
+      const p = (await res.json().catch(() => null)) as { detail?: string } | null;
+      throw new Error(`${p?.detail ?? 'recusado'} (HTTP ${res.status})`.slice(0, 400));
+    }
+    return (await res.json()) as { messages: Array<{ id?: string; from: string; fromTitle: string; content: string; at: string }> };
+  },
   async addSubtasks(taskId, body) {
     const res = await call(`/tasks/${encodeURIComponent(taskId)}/subtasks`, body);
     if (!res.ok) {
@@ -125,7 +141,7 @@ if (mode === 'agent' || mode === 'agent-demo') {
     process.exit(1);
   }
   executor = agentExecutor({
-    createModel: (job) => (mode === 'agent-demo' ? demoModel(job.model, { subtasks: process.env.RUNNER_DEMO_SUBTASKS === '1' }) : new AnthropicModelClient({ apiKey: anthropicKey!, model: job.model })),
+    createModel: (job) => (mode === 'agent-demo' ? demoModel(job.model, { subtasks: process.env.RUNNER_DEMO_SUBTASKS === '1', messages: process.env.RUNNER_DEMO_MESSAGES === '1' }) : new AnthropicModelClient({ apiKey: anthropicKey!, model: job.model })),
     dataDir: process.env.RUNNER_DATA_DIR ?? join(homedir(), '.command-ai-runner'),
     sandbox,
     allowDirectWrites: process.env.RUNNER_ALLOW_DIRECT_WRITES === '1',

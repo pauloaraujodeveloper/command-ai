@@ -32,6 +32,7 @@ export function hydrateRecord(store: Store, kind: string, data: unknown): void {
     task: store.tasks,
     approval: store.approvals,
     idempotency: store.idempotency,
+    message: store.messages,
     runner: store.runners,
   };
   tables[kind]?.hydrate(data as never);

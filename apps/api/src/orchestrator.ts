@@ -3,11 +3,12 @@ import {
   canTransitionTask,
   costFor,
   isTerminalTask,
+  MAX_MESSAGES_PER_TASK,
   type RiskLevel,
   type TaskStatus,
   type Usage,
 } from '@command-ai/shared';
-import type { Approval, Execution, Store, Task } from './store.ts';
+import type { Approval, Execution, Store, Task, TaskMessage } from './store.ts';
 
 export interface PlanTask {
   id: string;
@@ -15,6 +16,17 @@ export interface PlanTask {
   agentId: string;
   dependsOn: string[];
   risk: RiskLevel;
+}
+
+/** Mensagens entre agentes. */
+export const MAX_INBOX_AT_CLAIM = 20;
+export interface TaskMessageView {
+  id: string;
+  /** Id da tarefa remetente no plano. */
+  from: string;
+  fromTitle: string;
+  content: string;
+  at: string;
 }
 
 /** Limites do plano que o agente pode ampliar. */
@@ -421,6 +433,85 @@ export class Orchestrator {
     this.store.executions.update(exec.id, { planVersion: exec.planVersion + 1 });
     this.store.emit(exec.id, task.id, 'plan.updated', { added: specs.map((s) => s.id), by: task.planId, titles: specs.map((s) => s.title) });
     return specs.map((s) => s.id);
+  }
+
+  /* ---------------- mensagens entre tarefas ---------------- */
+
+  /** Uma tarefa em execução escreve para outra da mesma execução (ainda não terminada). */
+  sendMessage(fromTaskId: string, toPlanId: string, content: string, opts: { attempt?: number } = {}): TaskMessage {
+    const from = this.runningTask(fromTaskId, opts.attempt, 'enviar mensagens');
+    const all = this.store.tasks.filter((t) => t.executionId === from.executionId);
+    const to = all.find((t) => t.planId === toPlanId);
+    if (!to) throw new OrchestratorError('not_found', 'Tarefa de destino não encontrada neste plano.');
+    if (to.id === from.id) throw new OrchestratorError('invalid_plan', 'Uma tarefa não pode enviar mensagem para si mesma.');
+    if (isTerminalTask(to.status)) throw new OrchestratorError('recipient_closed', 'A tarefa de destino já terminou e não lerá mais mensagens.');
+    const sent = this.store.messages.filter((m) => m.fromTaskId === from.id).length;
+    if (sent >= MAX_MESSAGES_PER_TASK) throw new OrchestratorError('message_limit', `Esta tarefa já enviou ${MAX_MESSAGES_PER_TASK} mensagens (o limite).`);
+    const message = this.store.messages.insert({
+      id: randomUUID(),
+      organizationId: from.organizationId,
+      executionId: from.executionId,
+      fromTaskId: from.id,
+      toTaskId: to.id,
+      content,
+      createdAt: new Date().toISOString(),
+    });
+    this.store.emit(from.executionId, from.id, 'message.sent', { messageId: message.id, from: from.planId, to: to.planId, preview: content.slice(0, 200) });
+    return message;
+  }
+
+  /** Mensagens ainda não entregues a esta tentativa (e as marca como entregues). */
+  readMessages(taskId: string, opts: { attempt?: number } = {}): TaskMessageView[] {
+    const task = this.runningTask(taskId, opts.attempt, 'ler mensagens');
+    return this.deliver(task, (m) => m.readAttempt !== task.attempts);
+  }
+
+  /** Caixa de entrada completa, entregue junto com o trabalho quando a tarefa é reivindicada (cada tentativa recebe tudo). */
+  deliverInbox(taskId: string): TaskMessageView[] {
+    return this.deliver(this.mustTask(taskId), () => true).slice(-MAX_INBOX_AT_CLAIM);
+  }
+
+  /** As outras tarefas do plano (para o agente saber a quem escrever). */
+  peersOf(taskId: string): Array<{ taskId: string; title: string; status: string }> {
+    const task = this.mustTask(taskId);
+    return this.store.tasks
+      .filter((t) => t.executionId === task.executionId && t.id !== task.id)
+      .sort((a, b) => a.position - b.position)
+      .slice(0, 30)
+      .map((t) => ({ taskId: t.planId, title: t.title, status: t.status }));
+  }
+
+  /** Todas as mensagens da execução, para a pessoa acompanhar. */
+  messagesOfExecution(executionId: string): Array<TaskMessageView & { to: string; toTitle: string }> {
+    return this.store.messages
+      .filter((m) => m.executionId === executionId)
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))
+      .map((m) => ({ ...this.viewMessage(m), to: this.store.tasks.get(m.toTaskId)?.planId ?? '', toTitle: this.store.tasks.get(m.toTaskId)?.title ?? '' }));
+  }
+
+  private deliver(task: Task, pick: (m: TaskMessage) => boolean): TaskMessageView[] {
+    const list = this.store.messages
+      .filter((m) => m.toTaskId === task.id && pick(m))
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+    for (const m of list) this.store.messages.update(m.id, { readAttempt: task.attempts });
+    return list.map((m) => this.viewMessage(m));
+  }
+
+  private viewMessage(m: TaskMessage): TaskMessageView {
+    const from = this.store.tasks.get(m.fromTaskId);
+    return { id: m.id, from: from?.planId ?? '', fromTitle: from?.title ?? '', content: m.content, at: m.createdAt };
+  }
+
+  private runningTask(taskId: string, attempt: number | undefined, what: string): Task {
+    const task = this.mustTask(taskId);
+    if (attempt !== undefined && attempt !== task.attempts) {
+      throw new OrchestratorError('stale_attempt', 'Pedido de uma tentativa antiga: a tentativa atual é outra.');
+    }
+    const exec = this.mustExecution(task.executionId);
+    if (task.status !== 'running' || (exec.status !== 'running' && exec.status !== 'waiting_approval')) {
+      throw new OrchestratorError('invalid_transition', `Transição inválida: ${task.status} não pode ${what}`);
+    }
+    return task;
   }
 
   failTask(taskId: string, reason: string, opts: { attempt?: number } = {}): ReportOutcome {

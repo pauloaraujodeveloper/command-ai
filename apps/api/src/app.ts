@@ -15,6 +15,8 @@ import {
   registerSchema,
   runnerReportSchema,
   runnerUsageSchema,
+  sendMessageSchema,
+  readMessagesSchema,
   subtasksRequestSchema,
   toolApprovalRequestSchema,
   updatePlanSchema,
@@ -118,6 +120,8 @@ const ERROR_STATUS: Record<string, number> = {
   too_many_pending: 429,
   duplicate_task: 409,
   plan_limit: 409,
+  recipient_closed: 409,
+  message_limit: 429,
 };
 
 export async function buildApp(opts: AppOptions) {
@@ -1054,6 +1058,9 @@ export async function buildApp(opts: AppOptions) {
       {
         taskId: task.id,
         upstream,
+        // Mensagens de outros agentes (dado não confiável) e o plano da execução, para saber a quem escrever.
+        inbox: orchestrator.deliverInbox(task.id),
+        peers: orchestrator.peersOf(task.id),
         executionId: exec.id,
         workspacePath: project.workspacePath,
         prompt: `${task.title}\n\nObjetivo geral: ${exec.goal}`,
@@ -1086,6 +1093,36 @@ export async function buildApp(opts: AppOptions) {
     const body = parse(runnerUsageSchema, req.body);
     const out = orchestrator.addTaskUsage(task.id, body.usage, { turn: body.turn, attempt: body.attempt });
     return { ok: true, ...out };
+  });
+
+  /** Mensagem de um agente para outra tarefa da mesma execução. Fica registrada e visível na linha do tempo. */
+  app.post(`${api}/runner/tasks/:id/messages`, async (req, reply) => {
+    const runner = runnerOf(req, reply);
+    if (!runner) return reply;
+    const task = runnerTask(req, reply, runner.id, runner.organizationId);
+    if (!task) return reply;
+    const body = parse(sendMessageSchema, req.body);
+    const message = orchestrator.sendMessage(task.id, body.to, body.content, { attempt: body.attempt });
+    return reply.code(201).send({ id: message.id });
+  });
+
+  /** O agente lê as mensagens que chegaram para ele desde a última leitura. */
+  app.post(`${api}/runner/tasks/:id/messages/read`, async (req, reply) => {
+    const runner = runnerOf(req, reply);
+    if (!runner) return reply;
+    const task = runnerTask(req, reply, runner.id, runner.organizationId);
+    if (!task) return reply;
+    const body = parse(readMessagesSchema, req.body ?? {});
+    return { messages: orchestrator.readMessages(task.id, { attempt: body.attempt }) };
+  });
+
+  /** Todas as mensagens trocadas entre as tarefas da execução (para a pessoa acompanhar). */
+  app.get(`${api}/executions/:id/messages`, async (req, reply) => {
+    const auth = authOf(req, reply);
+    if (!auth) return reply;
+    const exec = orgExecution(auth, (req.params as { id: string }).id);
+    if (!exec) return problem(reply, 404, 'not_found', 'Execução não encontrada.');
+    return { items: orchestrator.messagesOfExecution(exec.id) };
   });
 
   /** O agente propõe subtarefas para o plano em andamento (a pessoa aprova a chamada no Runner). */
