@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./signing": "./src/signing.ts"
+    "./signing": "./src/signing.ts",
+    "./hierarchy": "./src/hierarchy.ts"
   },
   "scripts": {
     "test": "vitest run",
