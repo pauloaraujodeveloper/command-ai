@@ -38,6 +38,14 @@ function start(name, cmd, args, cwd, env) {
   procs.push(p);
   return p;
 }
+function stopOne(p) {
+  try {
+    if (process.platform === 'win32') execFileSync('taskkill', ['/pid', String(p.pid), '/t', '/f'], { stdio: 'ignore' });
+    else p.kill('SIGKILL');
+  } catch {
+    /* já encerrado */
+  }
+}
 function stopAll() {
   for (const p of procs) {
     try {
@@ -125,7 +133,7 @@ try {
   projectId = (await api('POST', '/projects', { name: 'Projeto E2E', workspacePath: repo })).id;
   agentId = (await api('POST', '/agents', { name: 'Agente E2E', role: 'Documentador', instructions: 'Documente o projeto.', providerKind: 'anthropic', model: 'claude-sonnet-5-5', budgetUsd: 5 })).id;
 
-  start('runner', 'npx', ['tsx', 'src/cli.ts'], join(root, 'apps/runner'), {
+  const runnerEnv = (extra = {}) => ({
     COMMAND_AI_API_URL: `http://127.0.0.1:${PORT}`,
     COMMAND_AI_RUNNER_TOKEN: runner.token,
     RUNNER_ALLOWED_WORKSPACES: repo,
@@ -135,7 +143,9 @@ try {
     RUNNER_POLL_MS: '400',
     RUNNER_APPROVAL_POLL_MS: '400',
     ANTHROPIC_API_KEY: '',
+    ...extra,
   });
+  start('runner', 'npx', ['tsx', 'src/cli.ts'], join(root, 'apps/runner'), runnerEnv());
   const rp = procs.at(-1);
   await waitFor(async () => rp.logs.includes('Sandbox de comandos'), 30_000, 'Runner subir');
   console.log(rp.logs.split('\n').filter((l) => /Executor|Sandbox|Workspaces/.test(l)).join('\n'));
@@ -174,10 +184,36 @@ try {
   const patchB = patchesB.map((f) => readFileSync(join(dataDir, 'patches', f), 'utf8')).join(' ');
   check('B: o rascunho continuou no patch (a exclusão foi negada)', /RASCUNHO\.tmp/.test(patchB));
 
+  /* ---- C: o agente cria subtarefas (Fase 4) ---- */
+  // Troca o Runner por um com o modelo de demonstração que delega: só a tarefa de análise cria 2 subtarefas encadeadas.
+  stopOne(rp);
+  start('runner2', 'npx', ['tsx', 'src/cli.ts'], join(root, 'apps/runner'), runnerEnv({ RUNNER_DEMO_SUBTASKS: '1' }));
+  const rp2 = procs.at(-1);
+  await waitFor(async () => rp2.logs.includes('Sandbox de comandos'), 30_000, 'Runner 2 subir');
+  const C = await runExecution('delegando', 'approved');
+  check('C: execução concluída com as subtarefas', C.exec.status === 'succeeded', C.exec.status);
+  const names = C.seenTool.map((t) => t.tool?.name).sort();
+  check('C: a criação de subtarefas passou por aprovação humana (com resumo e risco)', names.filter((n) => n === 'plan_subtasks').length === 1 && /2 subtarefa/.test(C.seenTool.find((t) => t.tool?.name === 'plan_subtasks')?.tool?.summary ?? ''), names.join(','));
+  const tasksC = C.taskList;
+  check('C: o plano cresceu de 3 para 5 tarefas', tasksC.length === 5, String(tasksC.length));
+  const subs = tasksC.filter((t) => t.parentTaskId);
+  check('C: as subtarefas apontam para a tarefa que as criou (geração 1)', subs.length === 2 && subs.every((t) => t.depth === 1 && t.parentTaskId.endsWith(':analise')), subs.map((t) => t.planId).join(','));
+  const exe = tasksC.find((t) => t.planId === 'execucao');
+  check('C: a tarefa "execucao" passou a esperar também a última subtarefa', exe.dependsOn.some((d) => d.endsWith(':sub-rev')), exe.dependsOn.join(','));
+  const evC = (await api('GET', `/executions/${C.exec.id}/events?format=json`));
+  const itemsC = evC.items ?? evC.events ?? evC;
+  const runningAt = (suffix) => itemsC.findIndex((e) => e.type === 'task.state_changed' && e.taskId?.endsWith(suffix) && e.payload?.to === 'running');
+  const doneAt = (suffix) => itemsC.findIndex((e) => e.type === 'task.state_changed' && e.taskId?.endsWith(suffix) && e.payload?.to === 'done');
+  check('C: a ordem é respeitada (sub-docs, depois sub-rev, e só então a execução)', doneAt(':sub-docs') >= 0 && runningAt(':sub-rev') > doneAt(':sub-docs') && runningAt(':execucao') > doneAt(':sub-rev'));
+  check('C: o painel foi avisado (evento plan.updated)', itemsC.some((e) => e.type === 'plan.updated' && (e.payload?.added ?? []).length === 2));
+  const tree = git('ls-tree', '-r', '--name-only', exe.workspaceCommit).toString();
+  check('C: o resultado da execução acumula o trabalho das subtarefas (commits combinados)', /SUBTAREFA-1\.md/.test(tree) && /SUBTAREFA-2\.md/.test(tree), tree.split('\n').filter((l) => /SUBTAREFA|AGENTE/.test(l)).join(','));
+  check('C: o branch e a árvore da pessoa continuam intactos', git('rev-parse', 'HEAD').toString().trim() === headBefore && git('status', '--porcelain').toString().trim() === '');
+
   /* ---- sandbox não deixa lixo ---- */
   const leftovers = execFileSync('docker', ['ps', '-a', '--filter', 'name=ca-sbx-', '--format', '{{.Names}}'], { stdio: 'pipe' }).toString().trim();
   check('Nenhum contêiner de sandbox sobrando', leftovers === '', leftovers);
-  check('Runner sem erros de comunicação', !/Erro de comunica/.test(rp.logs));
+  check('Runners sem erros de comunicação', !/Erro de comunica/.test(rp.logs) && !/Erro de comunica/.test(rp2.logs));
 } catch (err) {
   check(`erro inesperado: ${err instanceof Error ? err.message : err}`, false);
   for (const p of procs) console.log(`--- log ${p.name} (fim) ---\n${p.logs.slice(-1500)}`);

@@ -17,6 +17,10 @@ export interface PlanTask {
   risk: RiskLevel;
 }
 
+/** Limites do plano que o agente pode ampliar. */
+export const MAX_TASKS_PER_EXECUTION = 25;
+export const MAX_SUBTASK_DEPTH = 2;
+
 export class OrchestratorError extends Error {
   constructor(
     public code: string,
@@ -356,6 +360,67 @@ export class Orchestrator {
     if (exec.status !== 'running' && exec.status !== 'waiting_approval') return 'applied'; // já encerrada (orçamento)
     this.promoteReady(task.executionId);
     return 'applied';
+  }
+
+  /**
+   * O agente acrescenta subtarefas ao plano. Elas dependem da tarefa que as criou; as tarefas que esperavam
+   * por ela passam a esperar também pelas folhas das subtarefas. Tudo dentro de limites fixos.
+   */
+  addSubtasks(taskId: string, specs: PlanTask[], opts: { attempt?: number } = {}): string[] {
+    const task = this.mustTask(taskId);
+    if (opts.attempt !== undefined && opts.attempt !== task.attempts) {
+      throw new OrchestratorError('stale_attempt', 'Pedido de uma tentativa antiga: a tentativa atual é outra.');
+    }
+    const exec = this.mustExecution(task.executionId);
+    if (task.status !== 'running' || (exec.status !== 'running' && exec.status !== 'waiting_approval')) {
+      throw new OrchestratorError('invalid_transition', `Transição inválida: ${task.status} não pode criar subtarefas`);
+    }
+    const errors = validatePlan(specs);
+    if (errors.length) throw new OrchestratorError('invalid_plan', errors.join(' '));
+
+    const all = this.store.tasks.filter((t) => t.executionId === exec.id);
+    const clash = specs.find((s) => all.some((t) => t.planId === s.id));
+    if (clash) throw new OrchestratorError('duplicate_task', `Já existe uma tarefa com o id "${clash.id}" neste plano.`);
+    const depth = (task.depth ?? 0) + 1;
+    if (depth > MAX_SUBTASK_DEPTH) throw new OrchestratorError('plan_limit', `Subtarefas só podem ir até a geração ${MAX_SUBTASK_DEPTH}.`);
+    if (all.length + specs.length > MAX_TASKS_PER_EXECUTION) {
+      throw new OrchestratorError('plan_limit', `O plano passaria de ${MAX_TASKS_PER_EXECUTION} tarefas.`);
+    }
+
+    const full = (id: string) => `${exec.id}:${id}`;
+    const referenced = new Set(specs.flatMap((s) => s.dependsOn));
+    const leaves = specs.filter((s) => !referenced.has(s.id)).map((s) => full(s.id));
+    const basePosition = Math.max(...all.map((t) => t.position), 0) + 1;
+    const rank = { low: 0, medium: 1, high: 2 } as const;
+
+    specs.forEach((s, i) => {
+      this.store.tasks.insert({
+        id: full(s.id),
+        executionId: exec.id,
+        organizationId: exec.organizationId,
+        planId: s.id,
+        title: s.title,
+        agentId: s.agentId,
+        // Sem dependências no pedido, a subtarefa espera a tarefa que a criou (e herda o resultado dela).
+        dependsOn: s.dependsOn.length ? s.dependsOn.map(full) : [task.id],
+        // Nunca menos arriscada que a tarefa que a criou.
+        risk: rank[s.risk] < rank[task.risk] ? task.risk : s.risk,
+        status: 'pending',
+        attempts: 0,
+        maxAttempts: MAX_ATTEMPTS,
+        approved: false,
+        position: basePosition + i,
+        parentTaskId: task.id,
+        depth,
+      });
+    });
+    // Quem esperava pela tarefa criadora passa a esperar também pelo trabalho novo.
+    for (const t of all) {
+      if (t.status === 'pending' && t.dependsOn.includes(task.id)) this.store.tasks.update(t.id, { dependsOn: [...t.dependsOn, ...leaves] });
+    }
+    this.store.executions.update(exec.id, { planVersion: exec.planVersion + 1 });
+    this.store.emit(exec.id, task.id, 'plan.updated', { added: specs.map((s) => s.id), by: task.planId, titles: specs.map((s) => s.title) });
+    return specs.map((s) => s.id);
   }
 
   failTask(taskId: string, reason: string, opts: { attempt?: number } = {}): ReportOutcome {

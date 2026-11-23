@@ -1,7 +1,7 @@
 import { lstat, mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import type { Sandbox } from './sandbox.ts';
-import type { JsonSchemaProp, ToolSpec } from './types.ts';
+import type { JsonSchemaProp, ObjectSchema, ToolSpec } from './types.ts';
 import { PathGuardError, isProtectedPath, resolveInside } from './workspace.ts';
 
 export type WorkspaceKind = 'worktree' | 'readonly' | 'direct';
@@ -17,6 +17,15 @@ export interface ToolContext {
   /** Sem sandbox, `run_command` fica desativada: o agente NUNCA executa comandos no host. */
   sandbox?: Sandbox;
   commandTimeoutMs?: number;
+  /** Cria subtarefas no plano (servidor). Sem isso, `plan_subtasks` não existe. */
+  planSubtasks?: (tasks: SubtaskInput[]) => Promise<{ added: string[] }>;
+}
+
+export interface SubtaskInput {
+  id: string;
+  title: string;
+  dependsOn: string[];
+  risk?: 'low' | 'medium' | 'high';
 }
 
 export interface ToolResult {
@@ -47,20 +56,41 @@ const posix = (p: string) => p.split('\\').join('/');
 
 /** Valida a entrada contra o esquema da ferramenta. Devolve a mensagem de erro, ou null se estiver correta. */
 export function validateInput(spec: ToolSpec, input: unknown): string | null {
-  if (input === null || typeof input !== 'object' || Array.isArray(input)) return 'a entrada deve ser um objeto';
+  return validateObject(spec.inputSchema, input, '');
+}
+
+function validateObject(schema: ObjectSchema, input: unknown, path: string): string | null {
+  const at = (k: string) => (path ? `${path}.${k}` : k);
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return `${path || 'a entrada'} deve ser um objeto`;
   const obj = input as Record<string, unknown>;
-  const props = spec.inputSchema.properties;
-  for (const key of Object.keys(obj)) if (!(key in props)) return `campo inesperado "${key}"`;
-  for (const key of spec.inputSchema.required) if (obj[key] === undefined) return `campo obrigatório ausente: "${key}"`;
+  for (const key of Object.keys(obj)) if (!(key in schema.properties)) return `campo inesperado "${at(key)}"`;
+  for (const key of schema.required) if (obj[key] === undefined) return `campo obrigatório ausente: "${at(key)}"`;
   for (const [key, value] of Object.entries(obj)) {
-    const p: JsonSchemaProp = props[key]!;
     if (value === undefined) continue;
-    if (p.type === 'string' && typeof value !== 'string') return `"${key}" deve ser texto`;
-    if (p.type === 'boolean' && typeof value !== 'boolean') return `"${key}" deve ser verdadeiro ou falso`;
-    if (p.type === 'integer' && !Number.isInteger(value)) return `"${key}" deve ser um número inteiro`;
-    if (typeof value === 'string' && p.maxLength !== undefined && value.length > p.maxLength) return `"${key}" passa de ${p.maxLength} caracteres`;
-    if (typeof value === 'number' && p.minimum !== undefined && value < p.minimum) return `"${key}" deve ser no mínimo ${p.minimum}`;
-    if (typeof value === 'number' && p.maximum !== undefined && value > p.maximum) return `"${key}" deve ser no máximo ${p.maximum}`;
+    const err = validateValue(schema.properties[key]!, value, at(key));
+    if (err) return err;
+  }
+  return null;
+}
+
+function validateValue(p: JsonSchemaProp, value: unknown, key: string): string | null {
+  if (p.type === 'string' && typeof value !== 'string') return `"${key}" deve ser texto`;
+  if (p.type === 'boolean' && typeof value !== 'boolean') return `"${key}" deve ser verdadeiro ou falso`;
+  if (p.type === 'integer' && !Number.isInteger(value)) return `"${key}" deve ser um número inteiro`;
+  if (typeof value === 'string' && p.maxLength !== undefined && value.length > p.maxLength) return `"${key}" passa de ${p.maxLength} caracteres`;
+  if (typeof value === 'string' && p.enum && !p.enum.includes(value)) return `"${key}" deve ser um de: ${p.enum.join(', ')}`;
+  if (typeof value === 'number' && p.minimum !== undefined && value < p.minimum) return `"${key}" deve ser no mínimo ${p.minimum}`;
+  if (typeof value === 'number' && p.maximum !== undefined && value > p.maximum) return `"${key}" deve ser no máximo ${p.maximum}`;
+  if (p.type === 'array') {
+    if (!Array.isArray(value)) return `"${key}" deve ser uma lista`;
+    if (p.minItems !== undefined && value.length < p.minItems) return `"${key}" precisa de ao menos ${p.minItems} item(ns)`;
+    if (p.maxItems !== undefined && value.length > p.maxItems) return `"${key}" aceita no máximo ${p.maxItems} itens`;
+    for (let i = 0; i < value.length; i++) {
+      const item = p.items;
+      if (!item) continue;
+      const err = item.type === 'object' ? validateObject(item, value[i], `${key}[${i}]`) : validateValue(item as JsonSchemaProp, value[i], `${key}[${i}]`);
+      if (err) return err;
+    }
   }
   return null;
 }
@@ -277,6 +307,44 @@ export const TOOLS: Record<string, ToolDef> = {
     },
   },
 
+  plan_subtasks: {
+    writes: false,
+    spec: spec(
+      'plan_subtasks',
+      'Divide parte do trabalho em SUBTAREFAS que entram no plano desta execução. Cada subtarefa roda DEPOIS que esta tarefa terminar, em outro agente, a partir do resultado e dos arquivos que você deixou; ela NÃO vê esta conversa, então cada título precisa trazer o objetivo completo e o critério de pronto. Use só quando o trabalho restante for grande ou independente; para o resto, faça você mesmo. Até 5 por chamada. Exige aprovação humana. dependsOn só aceita ids de subtarefas desta mesma chamada.',
+      {
+        tasks: {
+          type: 'array',
+          description: 'Subtarefas a criar (1 a 5).',
+          minItems: 1,
+          maxItems: 5,
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: 'Identificador curto: letras, números, _ e - (até 40).', maxLength: 40 },
+              title: { type: 'string', description: 'Objetivo completo da subtarefa, com o critério de pronto.', maxLength: 200 },
+              dependsOn: { type: 'array', description: 'Ids de outras subtarefas desta chamada que precisam terminar antes.', maxItems: 5, items: { type: 'string', maxLength: 40 } },
+              risk: { type: 'string', description: 'Risco da subtarefa. Nunca fica abaixo do risco desta tarefa.', enum: ['low', 'medium', 'high'] },
+            },
+            required: ['id', 'title'],
+            additionalProperties: false,
+          },
+        },
+      },
+      ['tasks'],
+    ),
+    async run(input, ctx) {
+      if (!ctx.planSubtasks) return fail('Erro: criar subtarefas não está disponível neste ambiente');
+      const tasks = (input.tasks as Array<{ id: string; title: string; dependsOn?: string[]; risk?: SubtaskInput['risk'] }>).map((t) => ({ dependsOn: [], ...t }));
+      try {
+        const r = await ctx.planSubtasks(tasks);
+        return ok(`Subtarefas criadas: ${r.added.join(', ')}. Elas rodam depois que esta tarefa terminar; conclua o seu trabalho e descreva no resultado o que ficou para elas.`);
+      } catch (err) {
+        return fail(`Erro: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+  },
+
   run_command: {
     writes: false,
     spec: spec(
@@ -311,8 +379,9 @@ export const TOOLS: Record<string, ToolDef> = {
 };
 
 /** Ferramentas oferecidas ao modelo. Num workspace somente leitura, as que escrevem nem aparecem. */
-export function toolSpecs(kind: WorkspaceKind, opts: { sandbox?: boolean } = {}): ToolSpec[] {
+export function toolSpecs(kind: WorkspaceKind, opts: { sandbox?: boolean; planning?: boolean } = {}): ToolSpec[] {
   return Object.values(TOOLS)
+    .filter((t) => !(t.spec.name === 'plan_subtasks' && !opts.planning))
     .filter((t) => !(t.writes && kind === 'readonly'))
     .filter((t) => !(t.spec.name === 'run_command' && opts.sandbox === false))
     .map((t) => t.spec);

@@ -42,6 +42,13 @@ export function decide(tool: string, input: unknown, kind: WorkspaceKind): Decis
     return { action: 'approve', risk: 'medium', summary: `Apagar o arquivo ${clean(field(input, 'path'), 200)}` };
   }
 
+  if (tool === 'plan_subtasks') {
+    const tasks = Array.isArray(field(input, 'tasks')) ? (field(input, 'tasks') as unknown[]) : [];
+    const titles = tasks.map((t) => clean(field(t, 'title'), 60)).filter(Boolean).join('; ');
+    const high = tasks.some((t) => field(t, 'risk') === 'high');
+    return { action: 'approve', risk: high ? 'high' : 'medium', summary: `Criar ${tasks.length} subtarefa(s) no plano: ${titles}`.slice(0, 400) };
+  }
+
   if (tool === 'run_command') {
     const cmd = clean(field(input, 'command'), 300);
     if (input === null || typeof input !== 'object') return { action: 'approve', risk: 'high', summary: 'Executar comando com entrada inválida' };

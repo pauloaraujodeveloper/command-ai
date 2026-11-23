@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { AgentMessage, JsonSchemaProp, ModelClient, ModelRequest, ModelTurn, StopReason, ToolCall, ToolSpec } from './types.ts';
+import type { AgentMessage, JsonSchemaProp, ModelClient, ModelRequest, ModelTurn, ObjectSchema, StopReason, ToolCall, ToolSpec } from './types.ts';
 
 export interface AnthropicClientOptions {
   apiKey: string;
@@ -21,8 +21,22 @@ function toApiProp(p: JsonSchemaProp): Record<string, unknown> {
   if (p.minimum !== undefined) hints.push(`mínimo ${p.minimum}`);
   if (p.maximum !== undefined) hints.push(`máximo ${p.maximum}`);
   if (p.maxLength !== undefined) hints.push(`até ${p.maxLength} caracteres`);
+  if (p.minItems !== undefined) hints.push(`ao menos ${p.minItems} item(ns)`);
+  if (p.maxItems !== undefined) hints.push(`no máximo ${p.maxItems} itens`);
   const description = [p.description, hints.length ? `(${hints.join(', ')})` : ''].filter(Boolean).join(' ');
-  return { type: p.type, ...(description ? { description } : {}) };
+  const out: Record<string, unknown> = { type: p.type, ...(description ? { description } : {}) };
+  if (p.enum) out.enum = p.enum;
+  if (p.type === 'array' && p.items) out.items = p.items.type === 'object' ? toApiObject(p.items) : toApiProp(p.items as JsonSchemaProp);
+  return out;
+}
+
+function toApiObject(s: ObjectSchema): Record<string, unknown> {
+  return {
+    type: 'object',
+    properties: Object.fromEntries(Object.entries(s.properties).map(([k, v]) => [k, toApiProp(v)])),
+    required: s.required,
+    additionalProperties: false,
+  };
 }
 
 export function toApiTool(spec: ToolSpec): Anthropic.Tool {
@@ -30,12 +44,7 @@ export function toApiTool(spec: ToolSpec): Anthropic.Tool {
     name: spec.name,
     description: spec.description,
     strict: true,
-    input_schema: {
-      type: 'object',
-      properties: Object.fromEntries(Object.entries(spec.inputSchema.properties).map(([k, v]) => [k, toApiProp(v)])),
-      required: spec.inputSchema.required,
-      additionalProperties: false,
-    },
+    input_schema: toApiObject(spec.inputSchema) as Anthropic.Tool['input_schema'],
   };
 }
 

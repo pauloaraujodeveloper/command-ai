@@ -37,6 +37,8 @@ export interface RunnerClient {
   heartbeat(taskId: string): Promise<{ ok: boolean; cancel: boolean }>;
   /** Uso de uma interação com o modelo (idempotente por `turn`). `cancel` verdadeiro: o servidor mandou parar (orçamento, cancelamento). */
   usage(taskId: string, body: { turn: number; attempt?: number; usage: ExecutorResult['usage'] }): Promise<{ applied: boolean; cancel: boolean }>;
+  /** Cria subtarefas no plano da execução. O servidor impõe limites e recusa com o motivo. */
+  addSubtasks(taskId: string, body: { attempt?: number; tasks: Array<{ id: string; title: string; dependsOn: string[]; risk?: 'low' | 'medium' | 'high' }> }): Promise<{ added: string[] }>;
   requestApproval(taskId: string, req: { attempt?: number; tool: string; summary: string; risk: 'medium' | 'high'; argsPreview?: string }): Promise<{ approvalId: string }>;
   approvalStatus(taskId: string, approvalId: string): Promise<{ status: string; reason?: string } | null>;
   complete(taskId: string, body: ExecutorResult, attempt?: number): Promise<void>;

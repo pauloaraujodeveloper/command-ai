@@ -15,6 +15,7 @@ import {
   registerSchema,
   runnerReportSchema,
   runnerUsageSchema,
+  subtasksRequestSchema,
   toolApprovalRequestSchema,
   updatePlanSchema,
   type Role,
@@ -115,6 +116,8 @@ const ERROR_STATUS: Record<string, number> = {
   not_draft: 409,
   stale_attempt: 409,
   too_many_pending: 429,
+  duplicate_task: 409,
+  plan_limit: 409,
 };
 
 export async function buildApp(opts: AppOptions) {
@@ -1083,6 +1086,25 @@ export async function buildApp(opts: AppOptions) {
     const body = parse(runnerUsageSchema, req.body);
     const out = orchestrator.addTaskUsage(task.id, body.usage, { turn: body.turn, attempt: body.attempt });
     return { ok: true, ...out };
+  });
+
+  /** O agente propõe subtarefas para o plano em andamento (a pessoa aprova a chamada no Runner). */
+  app.post(`${api}/runner/tasks/:id/subtasks`, async (req, reply) => {
+    const runner = runnerOf(req, reply);
+    if (!runner) return reply;
+    const task = runnerTask(req, reply, runner.id, runner.organizationId);
+    if (!task) return reply;
+    const body = parse(subtasksRequestSchema, req.body);
+    const specs = [];
+    for (const t of body.tasks) {
+      const agentId = t.agentId ?? task.agentId;
+      const agent = store.agents.get(agentId);
+      if (!agent || agent.organizationId !== runner.organizationId) return problem(reply, 404, 'not_found', 'Agente não encontrado.');
+      specs.push({ id: t.id, title: t.title, agentId, dependsOn: t.dependsOn, risk: t.risk });
+    }
+    const added = orchestrator.addSubtasks(task.id, specs, { attempt: body.attempt });
+    store.audit({ organizationId: runner.organizationId, actor: `runner:${runner.id}`, action: 'plan.subtasks_added', target: task.id });
+    return reply.code(201).send({ added });
   });
 
   /** O agente pede aprovação humana para usar uma ferramenta de risco. */

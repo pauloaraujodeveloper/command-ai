@@ -154,6 +154,9 @@ export interface Task {
   maxAttempts: number;
   approved: boolean;
   output?: string;
+  /** Tarefa que criou esta (subtarefa) e a geração: tarefas do plano são 0, subtarefas 1, 2. */
+  parentTaskId?: string;
+  depth?: number;
   /** Commit com o trabalho desta tarefa (no repositório do Runner que a executou). Tarefas dependentes partem dele. */
   workspaceCommit?: string;
   error?: string;

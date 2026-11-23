@@ -148,6 +148,6 @@ describe('validação das entradas', () => {
     expect((await runTool('ferramenta_inexistente', {}, ctxFor())).content).toMatch(/desconhecida/i);
   });
   it('todas as ferramentas registradas são conhecidas pelo executor', () => {
-    expect(Object.keys(TOOLS).sort()).toEqual(['delete_file', 'edit_file', 'list_dir', 'read_file', 'run_command', 'search_files', 'write_file']);
+    expect(Object.keys(TOOLS).sort()).toEqual(['delete_file', 'edit_file', 'list_dir', 'plan_subtasks', 'read_file', 'run_command', 'search_files', 'write_file']);
   });
 });

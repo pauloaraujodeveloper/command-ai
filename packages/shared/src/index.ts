@@ -110,6 +110,7 @@ export const EVENT_TYPES = [
   'approval.requested',
   'approval.decided',
   'usage.updated',
+  'plan.updated',
   'alert.raised',
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
@@ -218,6 +219,26 @@ export const toolApprovalRequestSchema = z.object({
   summary: z.string().trim().min(1).max(500),
   risk: z.enum(['medium', 'high']),
   argsPreview: z.string().max(4000).optional(),
+});
+
+/** Subtarefas que o agente propõe para o plano da execução em andamento. */
+export const MAX_SUBTASKS_PER_CALL = 5;
+export const subtasksRequestSchema = z.object({
+  attempt: z.number().int().positive().optional(),
+  tasks: z
+    .array(
+      z.object({
+        id: z.string().regex(/^[a-z0-9_-]{1,40}$/i, 'id inválido: use letras, números, _ e -'),
+        title: z.string().trim().min(1).max(200),
+        /** Padrão: o mesmo agente da tarefa que criou a subtarefa. */
+        agentId: z.string().min(1).optional(),
+        /** Só ids de subtarefas deste mesmo pedido. A dependência da tarefa criadora é automática. */
+        dependsOn: z.array(z.string()).max(MAX_SUBTASKS_PER_CALL).default([]),
+        risk: z.enum(RISK_LEVELS).default('low'),
+      }),
+    )
+    .min(1)
+    .max(MAX_SUBTASKS_PER_CALL),
 });
 
 export const runnerReportSchema = z.object({

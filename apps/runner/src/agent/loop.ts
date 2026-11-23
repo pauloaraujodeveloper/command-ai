@@ -1,7 +1,7 @@
 import { redactSecrets } from '../runner.ts';
 import { awaitApproval, decide, type ApprovalClient } from './policy.ts';
 import type { Sandbox } from './sandbox.ts';
-import { runTool, TOOLS, toolSpecs, validateInput, type WorkspaceInfo } from './tools.ts';
+import { runTool, TOOLS, toolSpecs, validateInput, type SubtaskInput, type WorkspaceInfo } from './tools.ts';
 import type { AgentMessage, ModelClient, ToolCall, ToolResultMessage, TurnUsage } from './types.ts';
 
 export interface AgentLimits {
@@ -19,6 +19,8 @@ export interface AgentLimits {
 
 export interface AgentClient extends ApprovalClient {
   usage(taskId: string, body: { turn: number; attempt?: number; usage: Omit<TurnUsage, never> }): Promise<{ applied: boolean; cancel: boolean }>;
+  /** Cria subtarefas no plano. Ausente: a ferramenta `plan_subtasks` não é oferecida. */
+  addSubtasks?(taskId: string, body: { attempt?: number; tasks: SubtaskInput[] }): Promise<{ added: string[] }>;
 }
 
 export interface AgentDeps {
@@ -97,8 +99,9 @@ export async function runAgent(deps: AgentDeps): Promise<AgentResult> {
     return e instanceof Error ? e : new Error(String(e));
   };
 
-  const offered = new Set(toolSpecs(deps.workspace.kind, { sandbox: !!deps.sandbox }).map((t) => t.name));
-  const tools = toolSpecs(deps.workspace.kind, { sandbox: !!deps.sandbox });
+  const planning = typeof client.addSubtasks === 'function';
+  const tools = toolSpecs(deps.workspace.kind, { sandbox: !!deps.sandbox, planning });
+  const offered = new Set(tools.map((t) => t.name));
 
   const messages: AgentMessage[] = [{ role: 'user', content: deps.prompt }];
   let total: TurnUsage = { model: model.model, inputTokens: 0, outputTokens: 0 };
@@ -155,6 +158,7 @@ export async function runAgent(deps: AgentDeps): Promise<AgentResult> {
       signal: ctl.signal,
       sandbox: deps.sandbox,
       commandTimeoutMs: deps.commandTimeoutMs,
+      planSubtasks: planning ? (tasks) => client.addSubtasks!(deps.taskId, { attempt: deps.attempt, tasks }) : undefined,
     });
     deps.emit(`Resultado ${c.name}: ${r.isError ? 'erro' : 'ok'} — ${short(r.content, 100)}`);
     return { toolCallId: c.id, content: r.content, isError: !!r.isError };

@@ -22,6 +22,7 @@ function fakeClient(job: ReturnType<typeof jobFor> | null, heartbeat: RunnerClie
     }),
     heartbeat: vi.fn(heartbeat),
     usage: vi.fn(async () => ({ applied: true, cancel: false })),
+    addSubtasks: vi.fn(async () => ({ added: [] })),
     requestApproval: vi.fn(async () => ({ approvalId: 'ap-1' })),
     approvalStatus: vi.fn(async () => ({ status: 'pending' })),
     complete: vi.fn(async (_taskId: string, body: unknown) => {

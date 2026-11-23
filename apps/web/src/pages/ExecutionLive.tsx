@@ -12,7 +12,7 @@ interface Detail {
   approvals: Approval[];
 }
 
-const REFRESH_ON = new Set(['task.state_changed', 'execution.state_changed', 'approval.requested', 'approval.decided', 'usage.updated']);
+const REFRESH_ON = new Set(['task.state_changed', 'execution.state_changed', 'approval.requested', 'approval.decided', 'usage.updated', 'plan.updated']);
 
 export function ExecutionLive() {
   const { id } = useParams<{ id: string }>();

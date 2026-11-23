@@ -1,22 +1,30 @@
 /** Tipos comuns do agente: independentes do provedor de modelo. */
 
 export interface JsonSchemaProp {
-  type: 'string' | 'integer' | 'boolean';
+  type: 'string' | 'integer' | 'boolean' | 'array';
   description?: string;
   minimum?: number;
   maximum?: number;
   maxLength?: number;
+  /** Valores permitidos (texto). */
+  enum?: string[];
+  /** Para `array`: o tipo dos itens (objeto estrito ou texto) e o tamanho. */
+  items?: ObjectSchema | { type: 'string'; maxLength?: number };
+  minItems?: number;
+  maxItems?: number;
+}
+
+export interface ObjectSchema {
+  type: 'object';
+  properties: Record<string, JsonSchemaProp>;
+  required: string[];
+  additionalProperties: false;
 }
 
 export interface ToolSpec {
   name: string;
   description: string;
-  inputSchema: {
-    type: 'object';
-    properties: Record<string, JsonSchemaProp>;
-    required: string[];
-    additionalProperties: false;
-  };
+  inputSchema: ObjectSchema;
 }
 
 export interface ToolCall {

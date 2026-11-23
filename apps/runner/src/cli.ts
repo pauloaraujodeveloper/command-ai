@@ -65,6 +65,15 @@ const client: RunnerClient = {
     const r = (await res.json()) as { applied: boolean; cancel: boolean };
     return { applied: r.applied, cancel: r.cancel };
   },
+  async addSubtasks(taskId, body) {
+    const res = await call(`/tasks/${encodeURIComponent(taskId)}/subtasks`, body);
+    if (!res.ok) {
+      // O motivo da recusa (limite, id repetido…) volta ao agente; só o campo `detail`, nunca o corpo bruto.
+      const p = (await res.json().catch(() => null)) as { detail?: string; errors?: Array<{ message: string }> } | null;
+      throw new Error(`${p?.detail ?? 'recusado'}${p?.errors?.length ? ` ${p.errors.map((e) => e.message).join(' ')}` : ''} (HTTP ${res.status})`.slice(0, 400));
+    }
+    return (await res.json()) as { added: string[] };
+  },
   async requestApproval(taskId, req) {
     const res = await call(`/tasks/${encodeURIComponent(taskId)}/approvals`, req);
     if (!res.ok) throw new Error(`aprovação recusada pelo servidor: ${res.status}`);
@@ -116,7 +125,7 @@ if (mode === 'agent' || mode === 'agent-demo') {
     process.exit(1);
   }
   executor = agentExecutor({
-    createModel: (job) => (mode === 'agent-demo' ? demoModel(job.model) : new AnthropicModelClient({ apiKey: anthropicKey!, model: job.model })),
+    createModel: (job) => (mode === 'agent-demo' ? demoModel(job.model, { subtasks: process.env.RUNNER_DEMO_SUBTASKS === '1' }) : new AnthropicModelClient({ apiKey: anthropicKey!, model: job.model })),
     dataDir: process.env.RUNNER_DATA_DIR ?? join(homedir(), '.command-ai-runner'),
     sandbox,
     allowDirectWrites: process.env.RUNNER_ALLOW_DIRECT_WRITES === '1',
