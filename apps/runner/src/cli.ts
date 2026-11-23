@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { SignedJob } from '@command-ai/shared/signing';
@@ -6,6 +7,8 @@ import { demoModel } from './agent/demo-model.ts';
 import { agentExecutor } from './agent/executor.ts';
 import { createModelFor, providerCheck } from './agent/providers.ts';
 import { DockerSandbox, probeDocker, type Sandbox } from './agent/sandbox.ts';
+import { claudeCodeExecutor } from './agent/claude-code.ts';
+import { routeExecutor } from './agent/route.ts';
 import { simulatedExecutor } from './executors.ts';
 import { processNextJob, type RunnerClient } from './runner.ts';
 
@@ -116,7 +119,14 @@ const client: RunnerClient = {
 // Algum provedor configurado no ambiente deste Runner? (Ollama conta quando a URL foi definida: ele roda local e não tem chave.)
 const anyProvider = !!(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.DEEPSEEK_API_KEY || process.env.OLLAMA_BASE_URL);
 // RUNNER_EXECUTOR: agent (modelo real, padrão se houver chave) | agent-demo (roteiro fixo, sem chave) | simulated (padrão sem chave).
-const mode = process.env.RUNNER_EXECUTOR ?? (anyProvider ? 'agent' : 'simulated');
+// Claude Code instalado e logado (assinatura): o Runner o aciona como processo, sem chave de API.
+let claudeVersion: string | null = null;
+try {
+  claudeVersion = execFileSync(process.env.RUNNER_CLAUDE_BIN || 'claude', ['--version'], { timeout: 8_000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim().split(/\r?\n/)[0] ?? null;
+} catch {
+  /* não instalado */
+}
+const mode = process.env.RUNNER_EXECUTOR ?? (anyProvider || claudeVersion ? 'agent' : 'simulated');
 const num = (name: string, fallback: number) => {
   const v = Number(process.env[name]);
   return Number.isFinite(v) && v > 0 ? v : fallback;
@@ -137,8 +147,8 @@ if (process.env.RUNNER_SANDBOX !== 'off') {
 
 let executor = simulatedExecutor;
 if (mode === 'agent' || mode === 'agent-demo') {
-  if (mode === 'agent' && !anyProvider) {
-    console.error('RUNNER_EXECUTOR=agent exige a chave de ao menos um provedor (ANTHROPIC_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY) ou OLLAMA_BASE_URL.');
+  if (mode === 'agent' && !anyProvider && !claudeVersion) {
+    console.error('RUNNER_EXECUTOR=agent exige a chave de ao menos um provedor (ANTHROPIC_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY), OLLAMA_BASE_URL ou o Claude Code instalado e logado.');
     process.exit(1);
   }
   executor = agentExecutor({
@@ -158,10 +168,17 @@ if (mode === 'agent' || mode === 'agent-demo') {
     },
   });
 }
+// Cada agente escolhe o provedor: assinatura local (Claude Code), simulado, ou API. No modo de demonstração tudo usa o modelo de demonstração.
+const baseExecutor = executor;
+const claudeExec = claudeCodeExecutor({ dataDir: process.env.RUNNER_DATA_DIR ?? join(homedir(), '.command-ai-runner'), timeoutMs: num('RUNNER_TASK_TIMEOUT_MS', 30 * 60_000) });
+executor = routeExecutor({ mode, base: baseExecutor, claude: claudeExec, simulated: simulatedExecutor });
 console.log(`Runner conectado a ${apiUrl}`);
 console.log(`Executor: ${mode === 'agent' ? 'agente (modelo escolhido pelo provedor de cada agente)' : mode === 'agent-demo' ? 'agente de demonstração (roteiro fixo, sem chave)' : 'simulado (defina a chave de um provedor, por exemplo ANTHROPIC_API_KEY, para o agente real)'}`);
 if (mode !== 'simulated') console.log(`Sandbox de comandos: ${sandboxNote}`);
-if (mode === 'agent') for (const line of providerCheck()) console.log(`Provedor ${line}`);
+if (mode === 'agent') {
+  for (const line of providerCheck()) console.log(`Provedor ${line}`);
+  console.log(`Provedor claude_code: ${claudeVersion ? `Claude Code ${claudeVersion} (assinatura local, sem chave)` : 'não encontrado (instale e faça login, ou defina RUNNER_CLAUDE_BIN)'}`);
+}
 console.log(`Workspaces autorizados: ${allowedWorkspaces.join(', ')}`);
 
 let running = true;

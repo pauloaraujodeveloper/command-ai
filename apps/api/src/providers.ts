@@ -11,7 +11,7 @@ export interface ProviderCapabilities {
   usageMetrics: boolean;
 }
 
-export const CAPABILITIES: Record<'anthropic' | 'openai' | 'deepseek' | 'ollama' | 'simulated', ProviderCapabilities> = {
+export const CAPABILITIES: Record<'anthropic' | 'openai' | 'deepseek' | 'ollama' | 'claude_code' | 'simulated', ProviderCapabilities> = {
   anthropic: {
     streaming: true,
     toolCalling: true,
@@ -38,6 +38,18 @@ export const CAPABILITIES: Record<'anthropic' | 'openai' | 'deepseek' | 'ollama'
     streaming: true,
     toolCalling: true,
     structuredOutput: true,
+    sessions: false,
+    codeExecution: false,
+    mcp: false,
+    subagents: false,
+    cancellation: true,
+    usageMetrics: true,
+  },
+  // Claude Code pela assinatura do plano mensal (CLI local, sem chave): só ferramentas de arquivo, sem comandos, sem subtarefas, sem mensagens.
+  claude_code: {
+    streaming: true,
+    toolCalling: true,
+    structuredOutput: false,
     sessions: false,
     codeExecution: false,
     mcp: false,

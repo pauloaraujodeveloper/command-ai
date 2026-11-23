@@ -90,10 +90,12 @@ describe.skipIf(!HAS_REDIS)('RedisLimiter (Redis real)', () => {
   });
 
   it('a janela expira no Redis', async () => {
-    const l = mk(prefix(), { max: 1, windowMs: 150 });
+    // Janela folgada e espera por condição: com a máquina carregada, 150 ms podiam vencer antes da primeira conferência.
+    const l = mk(prefix(), { max: 1, windowMs: 1500 });
     await l.registerFailure('k');
     expect(await l.isLimited('k')).toBe(true);
-    await sleep(300);
+    const end = Date.now() + 8_000;
+    while ((await l.isLimited('k')) && Date.now() < end) await sleep(100);
     expect(await l.isLimited('k')).toBe(false);
   });
 

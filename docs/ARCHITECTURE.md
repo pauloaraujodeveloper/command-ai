@@ -33,3 +33,4 @@ Só o Runner roda na máquina do usuário, e é ele quem abre a conexão com a A
 4. [PWA e desktop](adr/0004-pwa-e-desktop.md)
 5. [Agente com ferramentas, aprovação humana e sandbox](adr/0005-agente-e-sandbox.md)
 6. [Vários provedores de modelo](adr/0006-multiprovedor.md)
+7. [Executor por assinatura (Claude Code)](adr/0007-executor-por-assinatura.md)

@@ -95,6 +95,7 @@ export function Agents() {
                 <option value="anthropic">anthropic</option>
                 <option value="openai">openai</option>
                 <option value="deepseek">deepseek</option>
+                <option value="claude_code">claude_code (assinatura)</option>
                 <option value="ollama">ollama</option>
               </select>
             </Field>

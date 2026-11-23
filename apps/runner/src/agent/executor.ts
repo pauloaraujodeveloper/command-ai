@@ -19,12 +19,17 @@ export interface AgentExecutorOptions {
 const MAX_PATCH_IN_OUTPUT = 20_000;
 
 /** Tarefa + resultado das anteriores. O que veio de outros agentes entra delimitado e rotulado como dado não confiável. */
-export function buildPrompt(job: JobPayload): string {
+export function buildPrompt(job: JobPayload, opts: { messaging?: boolean } = {}): string {
+  const messaging = opts.messaging ?? true;
   const parts = [buildUpstreamPrompt(job)];
   const peers = job.peers ?? [];
   if (peers.length > 0) {
     const list = peers.map((p) => `- ${p.taskId.replace(/[^\w-]/g, '_')}: ${p.title.replace(/[\r\n<>]/g, ' ').slice(0, 120)} (${p.status})`);
-    parts.push(['Plano desta execução (outras tarefas, com o id para usar em send_message):', ...list, 'Você pode combinar com elas por send_message e ler o que chegou com read_messages.'].join('\n'));
+    parts.push(
+      messaging
+        ? ['Plano desta execução (outras tarefas, com o id para usar em send_message):', ...list, 'Você pode combinar com elas por send_message e ler o que chegou com read_messages.'].join('\n')
+        : ['Plano desta execução (outras tarefas, só para contexto):', ...list].join('\n'),
+    );
   }
   if ((job.inbox ?? []).length > 0) parts.push(renderMessages(job.inbox!));
   return parts.join('\n\n');
@@ -48,6 +53,45 @@ function buildUpstreamPrompt(job: JobPayload): string {
   ].join('\n');
 }
 
+/** Abre o workspace da tarefa (worktree isolado, ou somente leitura) e conta isso no log. Compartilhado pelos executores. */
+export async function openTaskWorkspace(job: JobPayload, emit: (line: string) => void, o: { dataDir: string; allowDirectWrites?: boolean }) {
+  const ws = await createTaskWorkspace({
+    workspacePath: job.workspacePath,
+    taskId: job.taskId,
+    attempt: job.attempt ?? 1,
+    dataDir: o.dataDir,
+    allowDirectWrites: o.allowDirectWrites,
+    baseCommits: (job.upstream ?? []).map((u) => u.commit).filter((c): c is string => !!c),
+  });
+  emit(
+    ws.kind === 'worktree'
+      ? 'Workspace: worktree Git isolado (a sua pasta não é alterada)'
+      : ws.kind === 'direct'
+        ? 'Workspace: escrita direta autorizada (cada escrita exige aprovação)'
+        : 'Workspace: somente leitura (a pasta não é um repositório Git com commit)',
+  );
+  if (ws.baseNote) emit(`Aviso: ${ws.baseNote}`);
+  else if (job.upstream?.some((u) => u.commit)) emit('Workspace parte do resultado das tarefas anteriores');
+  return ws;
+}
+
+/** Texto final da tarefa: o que o agente disse + o resumo do que mudou no worktree (patch, arquivo, commit). */
+export function composeOutput(ws: { kind: string }, fin: { changedFiles: number; stat: string; patch: string; patchFile: string | null; commit?: string }, text: string): string {
+  let output = text.trim();
+  if (ws.kind === 'worktree') {
+    if (fin.changedFiles > 0) {
+      output += `\n\n---\nAlterações em worktree isolado (nada foi aplicado à sua pasta): ${fin.changedFiles} arquivo${fin.changedFiles === 1 ? '' : 's'}\n${fin.stat}\nPatch completo: ${fin.patchFile}\nPara aplicar: git apply "${fin.patchFile}"`;
+      if (fin.patch) output += `\n\n\`\`\`diff\n${fin.patch.slice(0, MAX_PATCH_IN_OUTPUT)}${fin.patch.length > MAX_PATCH_IN_OUTPUT ? '\n[patch cortado: veja o arquivo]' : ''}\n\`\`\``;
+    } else {
+      output += '\n\n---\nO agente não alterou arquivos.';
+    }
+  } else if (ws.kind === 'readonly') {
+    output += '\n\n---\nPasta em modo somente leitura (não é um repositório Git com commit): o agente não pôde alterar arquivos.';
+  }
+  if (fin.commit) output += `\n\nCommit do resultado: ${fin.commit} (referência refs/command-ai/ no repositório; as tarefas seguintes partem dele)`;
+  return output;
+}
+
 /**
  * Executor do agente: prepara um workspace isolado, roda o laço (modelo + ferramentas + aprovações),
  * e entrega o resultado como um patch para revisão. Nada é aplicado à pasta da pessoa automaticamente.
@@ -56,23 +100,7 @@ export function agentExecutor(o: AgentExecutorOptions): Executor {
   return async (job, emit, signal, ctx) => {
     if (!ctx) throw new Error('O executor do agente precisa do contexto do Runner (cliente) para relatar uso e pedir aprovação');
 
-    const ws = await createTaskWorkspace({
-      workspacePath: job.workspacePath,
-      taskId: job.taskId,
-      attempt: job.attempt ?? 1,
-      dataDir: o.dataDir,
-      allowDirectWrites: o.allowDirectWrites,
-      baseCommits: (job.upstream ?? []).map((u) => u.commit).filter((c): c is string => !!c),
-    });
-    emit(
-      ws.kind === 'worktree'
-        ? 'Workspace: worktree Git isolado (a sua pasta não é alterada)'
-        : ws.kind === 'direct'
-          ? 'Workspace: escrita direta autorizada (cada escrita exige aprovação)'
-          : 'Workspace: somente leitura (a pasta não é um repositório Git com commit)',
-    );
-    if (ws.baseNote) emit(`Aviso: ${ws.baseNote}`);
-    else if (job.upstream?.some((u) => u.commit)) emit('Workspace parte do resultado das tarefas anteriores');
+    const ws = await openTaskWorkspace(job, emit, o);
     emit(o.sandbox ? 'Comandos: sandbox Docker (sem rede, sem privilégios, com limites)' : 'Comandos: desativados (sandbox indisponível)');
 
     try {
@@ -93,19 +121,7 @@ export function agentExecutor(o: AgentExecutorOptions): Executor {
       });
 
       const fin = await ws.finalize();
-      let output = result.output.trim();
-      if (ws.kind === 'worktree') {
-        if (fin.changedFiles > 0) {
-          output += `\n\n---\nAlterações em worktree isolado (nada foi aplicado à sua pasta): ${fin.changedFiles} arquivo${fin.changedFiles === 1 ? '' : 's'}\n${fin.stat}\nPatch completo: ${fin.patchFile}\nPara aplicar: git apply "${fin.patchFile}"`;
-          if (fin.patch) output += `\n\n\`\`\`diff\n${fin.patch.slice(0, MAX_PATCH_IN_OUTPUT)}${fin.patch.length > MAX_PATCH_IN_OUTPUT ? '\n[patch cortado: veja o arquivo]' : ''}\n\`\`\``;
-        } else {
-          output += '\n\n---\nO agente não alterou arquivos.';
-        }
-      } else if (ws.kind === 'readonly') {
-        output += '\n\n---\nPasta em modo somente leitura (não é um repositório Git com commit): o agente não pôde alterar arquivos.';
-      }
-
-      if (fin.commit) output += `\n\nCommit do resultado: ${fin.commit} (referência refs/command-ai/ no repositório; as tarefas seguintes partem dele)`;
+      const output = composeOutput(ws, fin, result.output);
       emit(`Concluído em ${result.turns} interação(ões) com o modelo`);
       return {
         output,

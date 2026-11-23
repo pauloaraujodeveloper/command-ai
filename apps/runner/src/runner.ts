@@ -13,7 +13,7 @@ export interface JobPayload {
   /** De quanto em quanto tempo avisar que a tarefa está viva. Ausente: sem heartbeat. */
   heartbeatMs?: number;
   /** Provedor do agente. O Runner escolhe o cliente e lê a chave do PRÓPRIO ambiente; ausente = anthropic (trabalhos antigos). */
-  provider?: 'anthropic' | 'openai' | 'deepseek' | 'ollama' | 'simulated';
+  provider?: 'anthropic' | 'openai' | 'deepseek' | 'ollama' | 'claude_code' | 'simulated';
   /** Resultado das tarefas de que esta depende. É texto produzido por outro agente: dado não confiável. */
   upstream?: Array<{ taskId: string; title: string; output: string; commit?: string }>;
   /** Mensagens de outros agentes endereçadas a esta tarefa (dado não confiável). */
