@@ -5,6 +5,7 @@ import { createPool } from './db.ts';
 import { loadEnvFiles, orchestratorOptionsFromEnv, schemaName } from './env.ts';
 import { createNeonVerifier } from './neon-auth.ts';
 import { PgRepo } from './pg-repo.ts';
+import { FallbackLimiter, MemoryLimiter, RedisLimiter, type AttemptLimiter } from './rate-limit.ts';
 import { RedisBus } from './redis-bus.ts';
 import type { Repo } from './repo.ts';
 import { runSweep } from './sweep.ts';
@@ -55,6 +56,28 @@ if (process.env.DATABASE_URL && process.env.COMMAND_AI_STORAGE !== 'memory') {
   console.warn('[aviso] Sem DATABASE_URL: os dados ficam só em memória e somem ao reiniciar.');
 }
 
+/* ---- Limite de tentativas de login e MFA: compartilhado entre instâncias quando há Redis ---- */
+const LOGIN_MAX_FAILURES = 10;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+let attemptLimiter: AttemptLimiter | undefined;
+if (process.env.REDIS_URL) {
+  let lastWarn = 0;
+  const onError = (e: unknown) => {
+    if (Date.now() - lastWarn > 60_000) {
+      lastWarn = Date.now();
+      console.error('[redis] limite de login: usando a memória deste processo enquanto o Redis não responde:', e instanceof Error ? e.message : e);
+    }
+  };
+  attemptLimiter = new FallbackLimiter(
+    new RedisLimiter({ url: process.env.REDIS_URL, max: LOGIN_MAX_FAILURES, windowMs: LOGIN_WINDOW_MS, onError }),
+    new MemoryLimiter({ max: LOGIN_MAX_FAILURES, windowMs: LOGIN_WINDOW_MS }),
+    onError,
+  );
+  console.log('Limite de tentativas de login compartilhado entre instâncias (Redis).');
+} else {
+  console.warn('[aviso] Sem REDIS_URL: o limite de tentativas de login vale por processo (com N instâncias, o limite efetivo é N vezes maior).');
+}
+
 /* ---- Neon Auth ---- */
 const neonAuth =
   process.env.NEON_AUTH_BASE_URL && process.env.NEON_AUTH_JWKS_URL
@@ -70,7 +93,7 @@ if (webDist) console.log(`Servindo o app web de ${webDist}`);
 const requireMfa = process.env.REQUIRE_MFA ? process.env.REQUIRE_MFA === 'true' : production;
 if (production && !requireMfa) console.warn('[aviso] REQUIRE_MFA=false em produção: contas sem MFA terão acesso completo.');
 
-const built = await buildApp({ jobSigningKey, production, repo, neonAuth, webDist, neonAuthBaseUrl: process.env.NEON_AUTH_BASE_URL, requireMfa, orchestrator: orchestratorOptionsFromEnv() });
+const built = await buildApp({ attemptLimiter, jobSigningKey, production, repo, neonAuth, webDist, neonAuthBaseUrl: process.env.NEON_AUTH_BASE_URL, requireMfa, orchestrator: orchestratorOptionsFromEnv() });
 const { app } = built;
 const port = Number(process.env.PORT ?? 3011);
 const host = process.env.HOST ?? '127.0.0.1';
@@ -87,6 +110,7 @@ if (built.repo.kind === 'memory' || process.env.SWEEP_IN_PROCESS === 'true') {
 const shutdown = async (signal: string) => {
   app.log.info(`Recebido ${signal}; encerrando.`);
   await sweepEngine?.close();
+  await attemptLimiter?.close?.();
   await app.close(); // termina as requisições em curso (cada uma confirma a própria transação) e fecha o pool
   process.exit(0);
 };

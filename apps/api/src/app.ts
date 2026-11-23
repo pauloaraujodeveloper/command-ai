@@ -34,12 +34,15 @@ import {
 } from './auth.ts';
 import type { NeonVerifier } from './neon-auth.ts';
 import { Orchestrator, OrchestratorError, type OrchestratorOptions } from './orchestrator.ts';
+import { MemoryLimiter, type AttemptLimiter } from './rate-limit.ts';
 import { AGENT_TEMPLATES, CAPABILITIES } from './providers.ts';
 import { MemoryRepo, type Repo, type UnitContext, type UnitHandle } from './repo.ts';
 import { createStore, type Store, type User } from './store.ts';
 
 export interface AppOptions {
   jobSigningKey: string;
+  /** Contador de falhas de login e MFA. Padrão: em memória do processo (cada instância conta sozinha). */
+  attemptLimiter?: AttemptLimiter;
   /** Quanto tempo uma chave de idempotência vale (padrão 24 h). */
   idempotencyTtlMs?: number;
   /** Máximo de chaves guardadas por organização (padrão 500); as mais antigas saem primeiro. */
@@ -456,20 +459,12 @@ export async function buildApp(opts: AppOptions) {
   }
 
   /* ---------- limitador de tentativas de login ---------- */
-  const attempts = new Map<string, { count: number; resetAt: number }>();
-  const MAX_FAILURES = 10;
-  const WINDOW_MS = 15 * 60 * 1000;
+  // Padrão: contador em memória do processo. O servidor passa um limitador compartilhado (Redis) para valer entre instâncias.
+  const limiter: AttemptLimiter = opts.attemptLimiter ?? new MemoryLimiter({ max: 10, windowMs: 15 * 60 * 1000 });
   const failKey = (req: FastifyRequest, email: string) => `${req.ip}|${email}`;
-  const isLimited = (key: string) => {
-    const e = attempts.get(key);
-    return !!e && e.resetAt > Date.now() && e.count >= MAX_FAILURES;
-  };
-  const registerFailure = (key: string) => {
-    const now = Date.now();
-    const e = attempts.get(key);
-    if (!e || e.resetAt < now) attempts.set(key, { count: 1, resetAt: now + WINDOW_MS });
-    else e.count++;
-  };
+  const isLimited = (key: string) => limiter.isLimited(key);
+  const registerFailure = (key: string) => limiter.registerFailure(key);
+  const clearFailures = (key: string) => limiter.reset(key);
 
   const api = '/api/v1';
 
@@ -513,12 +508,12 @@ export async function buildApp(opts: AppOptions) {
   app.post(`${api}/auth/login`, async (req, reply) => {
     const body = parse(loginSchema, req.body);
     const key = failKey(req, body.email);
-    if (isLimited(key)) return problem(reply, 429, 'too_many_attempts', 'Muitas tentativas. Tente novamente em alguns minutos.');
+    if (await isLimited(key)) return problem(reply, 429, 'too_many_attempts', 'Muitas tentativas. Tente novamente em alguns minutos.');
 
     const found = await repo.findUserByEmail(body.email);
     const valid = await verifyPassword(body.password, found?.passwordHash ?? (await dummyHash()));
     if (!found || !valid) {
-      registerFailure(key);
+      await registerFailure(key);
       return problem(reply, 401, 'invalid_credentials', 'E-mail ou senha incorretos.');
     }
     // Migração silenciosa: scrypt (ou argon2id mais fraco que a política) vira argon2id com a senha que acabou de conferir.
@@ -539,11 +534,11 @@ export async function buildApp(opts: AppOptions) {
     });
     if ('error' in outcome) {
       if (outcome.error === 'mfa_required') return problem(reply, 401, 'mfa_required', 'Informe o código do aplicativo autenticador.');
-      registerFailure(key);
+      await registerFailure(key);
       if (outcome.error === 'invalid_mfa') return problem(reply, 401, 'invalid_mfa', 'Código inválido ou expirado.');
       return problem(reply, 401, 'invalid_credentials', 'E-mail ou senha incorretos.');
     }
-    attempts.delete(key);
+    await clearFailures(key);
     setSessionCookie(reply, outcome.token);
     return { user: publicUser(outcome.user) };
   });
@@ -556,13 +551,13 @@ export async function buildApp(opts: AppOptions) {
   app.post(`${api}/auth/neon/session`, async (req, reply) => {
     if (!opts.neonAuth) return problem(reply, 501, 'neon_auth_disabled', 'O Neon Auth não está configurado neste servidor.');
     const key = failKey(req, 'neon');
-    if (isLimited(key)) return problem(reply, 429, 'too_many_attempts', 'Muitas tentativas. Tente novamente em alguns minutos.');
+    if (await isLimited(key)) return problem(reply, 429, 'too_many_attempts', 'Muitas tentativas. Tente novamente em alguns minutos.');
 
     const header = req.headers.authorization ?? '';
     const token = header.startsWith('Bearer ') ? header.slice(7) : '';
     const identity = token ? await opts.neonAuth(token) : null;
     if (!identity) {
-      registerFailure(key);
+      await registerFailure(key);
       return problem(reply, 401, 'invalid_neon_token', 'Token do Neon Auth inválido ou expirado.');
     }
 
@@ -606,10 +601,10 @@ export async function buildApp(opts: AppOptions) {
     }
     if ('error' in outcome) {
       if (outcome.error === 'mfa_required') return problem(reply, 401, 'mfa_required', 'Informe o código do aplicativo autenticador.');
-      registerFailure(key);
+      await registerFailure(key);
       return problem(reply, 401, 'invalid_mfa', 'Código inválido ou expirado.');
     }
-    attempts.delete(key);
+    await clearFailures(key);
     setSessionCookie(reply, outcome.token);
     return { user: publicUser(outcome.user) };
   });
@@ -645,12 +640,12 @@ export async function buildApp(opts: AppOptions) {
     const { code } = parse(mfaActivateSchema, req.body);
     const user = store.users.get(auth.userId)!;
     const key = `mfa-activate|${user.id}`;
-    if (isLimited(key)) return problem(reply, 429, 'too_many_attempts', 'Muitas tentativas. Tente novamente em alguns minutos.');
+    if (await isLimited(key)) return problem(reply, 429, 'too_many_attempts', 'Muitas tentativas. Tente novamente em alguns minutos.');
     if (!acceptTotp(store, user.id, code)) {
-      registerFailure(key);
+      await registerFailure(key);
       return problem(reply, 400, 'invalid_mfa', 'Código inválido ou expirado.');
     }
-    attempts.delete(key);
+    await clearFailures(key);
     store.users.update(user.id, { mfaEnabled: true });
     // Todas as sessões desta pessoa deixam de ser limitadas: o segundo fator foi provado agora.
     for (const s of store.sessions.filter((x) => x.userId === user.id && x.limited === true)) store.sessions.update(s.id, { limited: false });

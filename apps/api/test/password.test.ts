@@ -95,7 +95,8 @@ describe('migração de hash no login', () => {
 
     const again = await app.inject({ method: 'POST', url: '/api/v1/auth/login', headers: H, payload: { email: 'ana@example.com', password: 'senha-antiga-123' } });
     expect(again.statusCode).toBe(200);
-  });
+    // scrypt e argon2id reais, em CPU: com a suíte inteira rodando em paralelo passa dos 5 s padrão
+  }, 30_000);
 
   it('novas contas já nascem com argon2id', async () => {
     await app.inject({ method: 'POST', url: '/api/v1/auth/register', headers: H, payload: { name: 'N', orgName: 'O', email: 'n@example.com', password: 'senha-muito-forte-1' } });

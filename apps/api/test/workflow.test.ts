@@ -112,14 +112,18 @@ describe.skipIf(!HAS_REDIS)('BullMqEngine (Redis real)', () => {
     };
     const w1 = mk('w1');
     const w2 = mk('w2');
+    const t0 = Date.now();
     await w1.e.start(async () => void seen.push(w1.name));
     await w2.e.start(async () => void seen.push(w2.name));
     await sleep(2_200); // ~5 ciclos de 400 ms
+    // Com a máquina carregada os ciclos atrasam: espera (até 10 s) por pelo menos 3 execuções em vez de supor o relógio.
+    while (seen.length < 3 && Date.now() - t0 < 10_000) await sleep(100);
+    const elapsed = Date.now() - t0;
     await w1.e.close();
     await w2.e.close();
-    // Com duplicação seriam ~10 execuções. Uma por ciclo dá ~5 (alguma folga para a partida).
     expect(seen.length).toBeGreaterThanOrEqual(3);
-    expect(seen.length).toBeLessThanOrEqual(7);
+    // Com duplicação seriam ~2 execuções por ciclo. O teto acompanha o tempo realmente decorrido (1 por ciclo + folga de partida).
+    expect(seen.length).toBeLessThanOrEqual(Math.ceil(elapsed / 400) + 2);
   }, 30_000);
 
   it('um erro na varredura não derruba o Worker: o ciclo seguinte roda', async () => {

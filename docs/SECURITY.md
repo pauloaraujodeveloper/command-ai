@@ -8,7 +8,7 @@ Resumo do que está implementado e testado, e do que ainda falta. Nada aqui gara
 | --- | --- |
 | Senhas com **Argon2id** (64 MiB, 3 iterações, 1 thread; mínimo da OWASP é 19 MiB, t=2), via WebAssembly. Hashes antigos em scrypt continuam válidos e são trocados por Argon2id no próximo login bem-sucedido; o mesmo vale se a política ficar mais forte | `auth.ts`, `password.test.ts` |
 | Hash fictício quando o usuário não existe: mesma resposta e custo para e-mail errado e senha errada | `auth.ts`, `api.test.ts` |
-| Limite de 10 falhas por IP e e-mail em 15 minutos (429); a ativação do MFA tem limite próprio | `app.ts`, `api.test.ts` |
+| Limite de 10 falhas por IP e e-mail em 15 minutos (429); a ativação do MFA tem limite próprio. **Compartilhado entre instâncias** por Redis (contagem atômica por script Lua, chave só como hash, sempre com validade); com o Redis fora, cai para a memória do processo | `rate-limit.ts`, `app.ts`, `api.test.ts`, `rate-limit.test.ts` (Redis real, duas instâncias, Redis fora do ar) |
 | MFA por TOTP (RFC 6238) exigido em **todos** os caminhos que criam sessão (senha e Neon Auth): sem o código, nenhuma sessão é criada | `app.ts`, `neon-auth.test.ts`, `mfa-policy.test.ts` |
 | **MFA obrigatório** (`REQUIRE_MFA`, ligado por padrão em produção): conta sem MFA recebe sessão limitada, que só alcança `/me`, a configuração do MFA e o logout. Todas as demais rotas, inclusive eventos e gestão, respondem 403 `mfa_enrollment_required` até o código ser validado | `app.ts`, `mfa-policy.test.ts` |
 | **Anti-replay de TOTP**: o mesmo código (ou um mais antigo) não vale duas vezes, inclusive o usado na ativação | `app.ts`, `mfa-policy.test.ts` |
@@ -67,7 +67,7 @@ O que **não** foi feito: nenhum teste com o modelo real, nenhuma auditoria exte
 - **Passkeys** não existem (previstas para uma segunda etapa). O Neon Auth gerenciado não oferece MFA; o app cobre isso com o próprio TOTP.
 - **MFA só por TOTP**, sem códigos de recuperação. Quem perde o aplicativo autenticador não tem como voltar sem intervenção manual.
 - **`REQUIRE_MFA` desligado fora de produção** por padrão.
-- **Limite de tentativas de login é por processo** (memória). Com N instâncias da API o limite efetivo é N vezes maior. Precisa de contador compartilhado (Redis ou banco).
+- **Limite de tentativas de login só é compartilhado com Redis** (`REDIS_URL`). Sem ele, ou com o Redis fora do ar, cada instância conta sozinha (com N instâncias o limite efetivo é N vezes maior). Escolha deliberada: não bloquear todos os logins por causa do Redis.
 - **Redis sem autenticação no ambiente local** (`docker-compose.yml` escuta só em 127.0.0.1). Em produção, exija senha e TLS: quem escreve no canal de eventos pode injetar eventos falsos na tela de quem assiste (o servidor ignora mensagens fora do formato, mas não valida a origem).
 - **Registros e escritas por organização são serializados e carregados por inteiro a cada requisição** (ADR 0002): um volume grande numa organização pode degradar o painel dela. Não medido.
 - **O dono do schema (`neondb_owner`) tem BYPASSRLS** e é usado só para migrações e para `db:create-app-role`. A credencial dele continua em `.env.local`; em produção, não a entregue ao processo da API. Sem `DATABASE_URL_APP` a API recusa subir em produção.

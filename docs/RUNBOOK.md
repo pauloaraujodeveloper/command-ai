@@ -16,7 +16,7 @@
 | `PORT`, `HOST` | API | Padrão `3011` e `127.0.0.1` |
 | `WEB_DIST` | API | Pasta do build web; padrão `../web/dist` |
 | `COMMAND_AI_STORAGE=memory` | API | Ignora o banco (demonstração) |
-| `REDIS_URL` | API, Worker | Ativa BullMQ (Worker) e eventos ao vivo entre processos. Sem ela: relógio em processo e eventos só na própria instância. Em produção use autenticação e TLS (`rediss://`) e `maxmemory-policy noeviction` |
+| `REDIS_URL` | API, Worker | Ativa BullMQ (Worker), eventos ao vivo e o **limite de tentativas de login compartilhado** entre processos. Sem ela: relógio em processo e eventos só na própria instância. Em produção use autenticação e TLS (`rediss://`) e `maxmemory-policy noeviction` |
 | `LEASE_MS` | API, Worker | Quanto tempo uma tarefa vive sem heartbeat (padrão 60000). O Runner bate a cada um terço. **API e Worker precisam do mesmo valor** |
 | `BACKOFF_BASE_MS`, `BACKOFF_MAX_MS` | API, Worker | Espera entre tentativas: base × 2^(n-1) até o teto (padrão 5000 e 300000) |
 | `MAX_EXECUTION_MS` | API, Worker | Prazo máximo de uma execução em andamento (padrão 7200000, 2 h) |

@@ -22,7 +22,7 @@ Requisitos: Node 22+ e pnpm 10 (`npm i -g pnpm`).
 
 ```powershell
 pnpm install
-pnpm test          # 343 testes (os de Postgres, Redis e Docker rodam contra serviços reais e são ignorados sem eles)
+pnpm test          # 354 testes (os de Postgres, Redis e Docker rodam contra serviços reais e são ignorados sem eles)
 pnpm build
 ```
 
@@ -78,6 +78,7 @@ Feito e testado:
 - Plano editável com validação de ciclos, dependências, aprovação humana para risco alto, novas tentativas com espera progressiva e parada por orçamento.
 - **Confiabilidade (Fase 2):** API sem estado em memória, com várias instâncias sobre o mesmo PostgreSQL; reivindicação de tarefa atômica; lease com heartbeat e recuperação de tarefas de Runner que sumiu (Worker + BullMQ); prazo máximo de execução; relatórios idempotentes e com número da tentativa; cancelamento que chega ao Runner e o interrompe.
 - **`Idempotency-Key`** nas criações de execução, agente, projeto e provedor: a mesma chave e o mesmo pedido devolvem a resposta guardada (cabeçalho `Idempotent-Replayed: true`), outro pedido com a mesma chave é recusado (422); vale por usuário, por 24 h, no máximo 500 por organização; o painel envia a chave sozinho. Criação de Runner fica de fora de propósito (a resposta tem o token).
+- **Limite de tentativas de login e MFA compartilhado entre instâncias** (10 falhas em 15 minutos por IP e e-mail) quando há `REDIS_URL`: contagem atômica no Redis, que só vê um hash da chave. Se o Redis cair, cada instância segue limitando em memória (o login não trava). Sem `REDIS_URL`, vale por processo e o servidor avisa na partida.
 - Eventos com número de sequência, replay por `Last-Event-ID` e reconexão sem perda, inclusive trocando de instância da API (Redis pub/sub + banco).
 - Runner com trabalho assinado (HMAC), lista de diretórios autorizados e remoção de segredos nos logs.
 - **Runner inteligente (Fase 3):** laço do agente com várias interações e ferramentas; guarda de caminhos (links, `.env`, `.git`, chaves); worktree Git isolado por tentativa e entrega por patch; comandos em contêiner Docker sem rede e com limites; política de risco com aprovação humana por chamada (apagar, rede, escrita direta); limites de turnos, tokens, tempo e custo; uso por interação no painel; cancelamento e orçamento que interrompem o agente. **Validado com um modelo roteirizado e um modelo de demonstração; nunca com o modelo real** (sem chave de API).
@@ -89,7 +90,6 @@ Ainda não feito (previsto no PRD):
 | Item | Situação |
 | --- | --- |
 | Motor durável (Temporal, Inngest, Restate) | A prova de conceito prevista no PRD não foi feita. O BullMQ cuida só da varredura de recuperação; a entrega de tarefas é atômica no PostgreSQL (ADR 0001) |
-| Limite de tentativas de login compartilhado entre instâncias | Hoje é por processo (memória), então com N instâncias o limite efetivo é N vezes maior |
 | Implantação do Worker e do Redis no Render | `pnpm worker` e o `docker-compose.yml` existem; a implantação **não foi testada** |
 | Vazão e custo por requisição | Cada requisição carrega os registros da organização e as escritas são serializadas por organização. Não foi medido (ADR 0002) |
 | Passkeys (WebAuthn), códigos de recuperação do MFA e login do Runner por código de dispositivo | Não implementados. O Runner usa token revogável |
