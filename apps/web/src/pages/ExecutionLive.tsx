@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { buildHierarchy } from '@command-ai/shared/hierarchy';
 import { ExecutionGraph } from '../components/ExecutionGraph';
+import { HierarchyChart } from '../components/HierarchyChart';
 import { Button, cx, ErrorNote, money, RiskBadge, Section, Spinner, StateIcon, StatusBadge } from '../components/ui';
-import { api, ApiError, type Approval, type EventEnvelope, type Execution, type Task } from '../lib/api';
+import { api, ApiError, type Agent, type AgentMessageView, type Approval, type EventEnvelope, type Execution, type Task } from '../lib/api';
 import { useExecutionEvents, useQuery } from '../lib/hooks';
 import { useI18n, type MessageKey } from '../lib/i18n';
 
@@ -12,13 +14,17 @@ interface Detail {
   approvals: Approval[];
 }
 
-const REFRESH_ON = new Set(['task.state_changed', 'execution.state_changed', 'approval.requested', 'approval.decided', 'usage.updated', 'plan.updated']);
+const REFRESH_ON = new Set(['task.state_changed', 'execution.state_changed', 'approval.requested', 'approval.decided', 'usage.updated', 'plan.updated', 'message.sent']);
 
 export function ExecutionLive() {
   const { id } = useParams<{ id: string }>();
   const { t } = useI18n();
   const detail = useQuery(() => api<Detail>(`/executions/${id}`), [id]);
+  const agentsQ = useQuery(() => api<{ items: Agent[] }>('/agents'));
+  const messagesQ = useQuery(() => api<{ items: AgentMessageView[] }>(`/executions/${id}/messages`), [id]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+  const [view, setView] = useState<'agents' | 'tasks' | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -27,12 +33,23 @@ export function ExecutionLive() {
   const { events, connected } = useExecutionEvents(id, (e) => {
     if (!REFRESH_ON.has(e.type)) return;
     clearTimeout(refreshTimer.current);
-    refreshTimer.current = setTimeout(() => void detail.reload(true), 150);
+    refreshTimer.current = setTimeout(() => {
+      void detail.reload(true);
+      if (e.type === 'message.sent') void messagesQ.reload(true);
+    }, 150);
   });
   useEffect(() => () => clearTimeout(refreshTimer.current), []);
 
   const tasksById = useMemo(() => new Map((detail.data?.tasks ?? []).map((x) => [x.id, x])), [detail.data]);
-  const visible = selected ? events.filter((e) => e.taskId === selected) : events;
+  const agentList = agentsQ.data?.items ?? [];
+  const agentTaskIds = useMemo(() => new Set((detail.data?.tasks ?? []).filter((x) => x.agentId === selectedAgent).map((x) => x.id)), [detail.data, selectedAgent]);
+  const hierarchy = useMemo(
+    () => buildHierarchy({ agents: agentList, tasks: detail.data?.tasks ?? [], messages: messagesQ.data?.items ?? [], withRequest: true, withResult: true }),
+    [agentList, detail.data, messagesQ.data],
+  );
+  const hasTeam = agentList.some((a) => a.kind === 'orchestrator' || a.parentAgentId) || hierarchy.nodes.filter((n) => n.kind === 'agent').length > 1;
+  const mode = view ?? (hasTeam ? 'agents' : 'tasks');
+  const visible = mode === 'agents' && selectedAgent ? events.filter((e) => e.taskId && agentTaskIds.has(e.taskId)) : mode === 'tasks' && selected ? events.filter((e) => e.taskId === selected) : events;
 
   const logRef = useRef<HTMLOListElement>(null);
   useEffect(() => {
@@ -198,18 +215,40 @@ export function ExecutionLive() {
         </div>
       </div>
 
-      <Section title={t('runs.graph')}>
-        <ExecutionGraph tasks={tasks} selectedId={selected} onSelect={setSelected} />
+      <Section
+        title={mode === 'agents' ? t('runs.agentsView') : t('runs.graph')}
+        aside={
+          <div role="group" aria-label={t('runs.graph')} className="inline-flex overflow-hidden rounded-md border border-line-strong text-sm">
+            {(['agents', 'tasks'] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                aria-pressed={mode === v}
+                onClick={() => setView(v)}
+                className={cx('px-3 py-1', mode === v ? 'bg-raised font-medium text-fg' : 'text-muted hover:text-fg')}
+              >
+                {v === 'agents' ? t('runs.viewAgents') : t('runs.viewTasks')}
+              </button>
+            ))}
+          </div>
+        }
+      >
+        {mode === 'agents' ? (
+          <HierarchyChart hierarchy={hierarchy} mode="execution" requestText={execution.goal} resultStatus={execution.status} selectedId={selectedAgent} onSelect={setSelectedAgent} />
+        ) : (
+          <ExecutionGraph tasks={tasks} selectedId={selected} onSelect={setSelected} />
+        )}
       </Section>
 
       <Section
         title={t('runs.timeline')}
         aside={
           <span className="text-sm text-muted">
-            {selected ? (
+            {(mode === 'agents' ? selectedAgent : selected) ? (
               <>
-                {t('runs.filtering')} <span className="text-fg">{tasksById.get(selected)?.title}</span>{' '}
-                <button type="button" onClick={() => setSelected(null)} className="underline hover:text-fg">
+                {mode === 'agents' ? t('runs.filterAgent') : t('runs.filtering')}{' '}
+                <span className="text-fg">{mode === 'agents' ? (agentList.find((a) => a.id === selectedAgent)?.name ?? selectedAgent) : tasksById.get(selected!)?.title}</span>{' '}
+                <button type="button" onClick={() => (mode === 'agents' ? setSelectedAgent(null) : setSelected(null))} className="underline hover:text-fg">
                   {t('runs.filterAll')}
                 </button>
               </>

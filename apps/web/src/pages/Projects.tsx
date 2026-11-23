@@ -4,6 +4,71 @@ import { api, ApiError, type Project } from '../lib/api';
 import { useQuery } from '../lib/hooks';
 import { useI18n } from '../lib/i18n';
 
+const MAX_CONTEXT = 100_000;
+
+function ContextEditor({ project, onSaved }: { project: Project; onSaved: () => Promise<void> }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState(project.context ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const size = (project.context ?? '').length;
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      await api(`/projects/${project.id}`, { method: 'PATCH', body: { context: text } });
+      await onSaved();
+      setSaved(true);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t('err.generic'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2">
+      <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
+        <span>
+          {t('projects.context')}: {size > 0 ? `${size.toLocaleString()} ${t('projects.contextChars')}` : t('projects.contextNone')}
+        </span>
+        <button type="button" className="text-fg underline underline-offset-2" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+          {t('projects.contextEdit')}
+        </button>
+      </div>
+      {open && (
+        <div className="mt-2 space-y-2">
+          <textarea
+            aria-label={t('projects.context')}
+            rows={12}
+            className={`${inputCls} font-mono text-sm`}
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              setSaved(false);
+            }}
+            maxLength={MAX_CONTEXT}
+          />
+          <p className="text-xs text-muted">
+            {t('projects.contextHint')} {text.length.toLocaleString()} / {MAX_CONTEXT.toLocaleString()} {t('projects.contextChars')}
+          </p>
+          {error && <ErrorNote message={error} />}
+          <div className="flex items-center gap-3">
+            <Button type="button" variant="primary" disabled={busy} onClick={() => void save()}>
+              {t('projects.contextSave')}
+            </Button>
+            {saved && <span role="status" className="text-sm text-done">{t('projects.contextSaved')}</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Projects() {
   const { t } = useI18n();
   const projects = useQuery(() => api<{ items: Project[] }>('/projects'));
@@ -40,6 +105,7 @@ export function Projects() {
               <li key={p.id} className="px-4 py-3">
                 <div className="font-medium">{p.name}</div>
                 <div className="break-all font-mono text-sm text-muted">{p.workspacePath}</div>
+                <ContextEditor project={p} onSaved={() => projects.reload(true)} />
               </li>
             ))}
           </ul>
